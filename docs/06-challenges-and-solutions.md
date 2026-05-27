@@ -4,7 +4,11 @@
 
 挑戰：IFC loader 可能把模型合併為大 mesh，造成物件級 selection 困難。
 
-暫定解法：在 IFC loader step 優先調查 expressID、geometry groups、raycasting metadata，以及 loader 是否提供 element lookup API。
+Step 4A 決策後解法：
+
+- 先採 `@thatopen/components` 的 Fragments 管線，避免使用已 deprecated 的 `web-ifc-three` 主線整合。
+- Step 5~7 先以 `modelId + localId` 當作可持久化 object identity，先確保載入、顯示、camera fit、狀態流可落地。
+- Step 8 再專門驗證 `localId` 與 `expressID` 對映與 raycast metadata 精度，決定是否可提升到 IFC element-level selection。
 
 ## IFC object-level selection fallback strategy
 
@@ -21,6 +25,11 @@ README 揭露要求：
 - 明確說明「目前 IFC selection 精度」是 element-level 或 model-level。
 - 若是 model-level fallback，需寫清楚限制、影響範圍、後續改善方向。
 - demo 說明需避免誤導成完整 BIM element 編輯器。
+
+Step 4A 補充：
+
+- 若 localId 可穩定對應到 IFC item，就優先走 Level 2（fragment-level）並在 Step 8 挑戰 Level 3。
+- 若 localId / metadata 不穩定，Step 9~10 僅承諾 Level 1 或 Level 2，不在 MVP 強推 element-level transform。
 
 ## Selection abstraction
 

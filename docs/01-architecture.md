@@ -66,3 +66,18 @@ MVP 先使用 React state 與小型 context 管理。若狀態快速變複雜，
 ## Browser-only 限制
 
 所有操作在瀏覽器完成。檔案讀取使用 Browser File API，儲存使用 local JSON download。
+
+## IFC loader 整合邊界（Step 4A 決策）
+
+Step 4A 選型採 `@thatopen/components` + `@thatopen/fragments` + `web-ifc`，並維持現有 React + R3F 架構不重寫。
+
+- `src/lib/` 新增 IFC runtime loader utility：
+  - 封裝 `IfcLoader.setup()`、`IfcLoader.load()`、Fragments worker 初始化。
+  - 封裝 progress callback 與錯誤轉譯，避免 UI 直接依賴第三方 API 細節。
+- `src/components/`：
+  - 只處理上傳事件、狀態顯示、scene 掛載，不直接 new loader instance。
+- identity 策略：
+  - Step 5~7 先以 `modelId + localId` 作為 IFC scene object identity。
+  - Step 8 再驗證 `localId` 與 `expressID` 對映精度，決定 element-level selection 可行性。
+- persistence 影響：
+  - project JSON 仍只存 object identity + transform，不存幾何本體。
