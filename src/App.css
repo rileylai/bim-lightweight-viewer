@@ -97,7 +97,19 @@
   color: #1f5f3f;
 }
 
+.ifc-toolbar-status[data-state='loading'] {
+  color: #6d5714;
+}
+
+.ifc-toolbar-status[data-state='loaded'] {
+  color: #2f5f38;
+}
+
 .ifc-toolbar-status[data-state='invalid'] {
+  color: #a23c38;
+}
+
+.ifc-toolbar-status[data-state='error'] {
   color: #a23c38;
 }
 
@@ -187,7 +199,25 @@
   color: #1d643d;
 }
 
+.ifc-state-message.is-loading {
+  border-color: #dfc98f;
+  background: #fff9ec;
+  color: #6b5311;
+}
+
+.ifc-state-message.is-loaded {
+  border-color: #95d5ab;
+  background: #f3fff6;
+  color: #1f5d36;
+}
+
 .ifc-state-message.is-invalid {
+  border-color: #e2b9b6;
+  background: #fff6f5;
+  color: #a23c38;
+}
+
+.ifc-state-message.is-error {
   border-color: #e2b9b6;
   background: #fff6f5;
   color: #a23c38;

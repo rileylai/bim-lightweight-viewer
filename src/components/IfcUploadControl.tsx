@@ -19,7 +19,7 @@ function IfcUploadControl({ uploadState, onSelectIfcFile }: IfcUploadControlProp
     <div className="ifc-upload-control">
       <label className="toolbar-upload-button">
         <input type="file" accept=".ifc" onChange={handleFileChange} />
-        <span>IFC Upload (Step 4)</span>
+        <span>IFC Upload (Step 5)</span>
       </label>
       <p className="ifc-toolbar-status" data-state={uploadState.status}>
         {uploadState.file ? uploadState.file.name : 'No IFC file'}

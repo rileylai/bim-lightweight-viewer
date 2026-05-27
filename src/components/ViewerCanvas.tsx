@@ -1,11 +1,42 @@
-import { Canvas } from '@react-three/fiber'
+import { useEffect } from 'react'
 import { OrbitControls } from '@react-three/drei'
+import { Canvas, useFrame, useThree } from '@react-three/fiber'
+import { bindIfcRuntimeCamera, updateIfcRuntimeView } from '../lib/ifcLoaderRuntime'
+import type { IfcRuntimeModel } from '../types/ifc'
 
 interface ViewerCanvasProps {
   orbitEnabled?: boolean
+  ifcModel: IfcRuntimeModel | null
 }
 
-function ViewerCanvas({ orbitEnabled = true }: ViewerCanvasProps) {
+interface IfcRuntimeBridgeProps {
+  ifcModel: IfcRuntimeModel | null
+}
+
+function IfcRuntimeBridge({ ifcModel }: IfcRuntimeBridgeProps) {
+  const { camera } = useThree()
+
+  useEffect(() => {
+    if (!ifcModel) {
+      return
+    }
+
+    // 將目前 R3F 相機同步到 IFC fragments runtime，讓載入後模型能依視角更新可見性。
+    bindIfcRuntimeCamera(camera)
+  }, [camera, ifcModel])
+
+  useFrame(() => {
+    if (!ifcModel) {
+      return
+    }
+
+    updateIfcRuntimeView()
+  })
+
+  return null
+}
+
+function ViewerCanvas({ orbitEnabled = true, ifcModel }: ViewerCanvasProps) {
   return (
     <Canvas camera={{ position: [5.4, 3.8, 5.4], fov: 50, near: 0.1, far: 120 }}>
       {/* Step 3 補上可互動的 OrbitControls，並保留 enabled 入口給後續 TransformControls 停用控制。 */}
@@ -29,10 +60,16 @@ function ViewerCanvas({ orbitEnabled = true }: ViewerCanvasProps) {
       <gridHelper args={[20, 20, '#9cb2c4', '#c8d8e4']} position={[0, -0.6, 0]} />
       <axesHelper args={[2]} />
 
-      <mesh position={[0, 0.2, 0]}>
-        <boxGeometry args={[1.4, 1.4, 1.4]} />
-        <meshStandardMaterial color="#4d85ab" roughness={0.6} metalness={0.1} />
-      </mesh>
+      <IfcRuntimeBridge ifcModel={ifcModel} />
+
+      {ifcModel ? (
+        <primitive object={ifcModel.object} />
+      ) : (
+        <mesh position={[0, 0.2, 0]}>
+          <boxGeometry args={[1.4, 1.4, 1.4]} />
+          <meshStandardMaterial color="#4d85ab" roughness={0.6} metalness={0.1} />
+        </mesh>
+      )}
 
       <mesh position={[0, -0.62, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[24, 24]} />

@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import IfcUploadControl from './components/IfcUploadControl'
 import ViewerCanvas from './components/ViewerCanvas'
-import type { IfcUploadState } from './types/ifc'
+import { loadIfcRuntimeModel } from './lib/ifcLoaderRuntime'
+import type { IfcRuntimeModel, IfcUploadState } from './types/ifc'
 import './App.css'
 
 const initialIfcUploadState: IfcUploadState = {
@@ -13,8 +14,18 @@ const initialIfcUploadState: IfcUploadState = {
 function App() {
   const orbitControlsEnabled = true
   const [ifcUploadState, setIfcUploadState] = useState<IfcUploadState>(initialIfcUploadState)
+  const [ifcRuntimeModel, setIfcRuntimeModel] = useState<IfcRuntimeModel | null>(null)
+  const latestLoadRequestIdRef = useRef(0)
 
-  const handleSelectIfcFile = (file: File | null) => {
+  const toErrorMessage = (error: unknown) => {
+    if (error instanceof Error) {
+      return error.message
+    }
+
+    return '未知錯誤'
+  }
+
+  const handleSelectIfcFile = async (file: File | null) => {
     if (!file) {
       return
     }
@@ -22,7 +33,7 @@ function App() {
     const isIfcFile = file.name.toLowerCase().endsWith('.ifc')
     if (!isIfcFile) {
       setIfcUploadState({
-        file: null,
+        file,
         status: 'invalid',
         message: '檔案格式錯誤：請選擇 .ifc 檔案。',
       })
@@ -31,9 +42,37 @@ function App() {
 
     setIfcUploadState({
       file,
-      status: 'pending',
-      message: '檔案已選擇，待 Step 5 進行 IFC 解析與載入。',
+      status: 'loading',
+      message: `IFC 解析與載入中：${file.name}`,
     })
+
+    const requestId = latestLoadRequestIdRef.current + 1
+    latestLoadRequestIdRef.current = requestId
+
+    try {
+      const loadedIfcModel = await loadIfcRuntimeModel(file)
+
+      if (latestLoadRequestIdRef.current !== requestId) {
+        return
+      }
+
+      setIfcRuntimeModel(loadedIfcModel)
+      setIfcUploadState({
+        file,
+        status: 'loaded',
+        message: `IFC 載入完成：${loadedIfcModel.fileName}`,
+      })
+    } catch (error) {
+      if (latestLoadRequestIdRef.current !== requestId) {
+        return
+      }
+
+      setIfcUploadState({
+        file,
+        status: 'error',
+        message: `IFC 載入失敗：${toErrorMessage(error)}`,
+      })
+    }
   }
 
   return (
@@ -48,7 +87,7 @@ function App() {
           <button type="button" disabled>
             Move / Rotate / Scale (Step 10)
           </button>
-          <span className="status-pill">Step 4</span>
+          <span className="status-pill">Step 5</span>
         </div>
       </header>
 
@@ -59,14 +98,14 @@ function App() {
             <p>OrbitControls 已啟用：左鍵旋轉、右鍵平移、滾輪縮放。</p>
           </div>
           <div className="viewer-canvas-wrapper">
-            <ViewerCanvas orbitEnabled={orbitControlsEnabled} />
+            <ViewerCanvas orbitEnabled={orbitControlsEnabled} ifcModel={ifcRuntimeModel} />
           </div>
         </section>
 
         <aside className="sidebar-panel" aria-label="sidebar placeholder">
           <h2>Sidebar Placeholder</h2>
           <ul>
-            <li>Current model: {ifcUploadState.file ? 'IFC selected (not loaded)' : 'none'}</li>
+            <li>Current model: {ifcRuntimeModel ? `${ifcRuntimeModel.sourceType}:${ifcRuntimeModel.modelId}` : 'none'}</li>
             <li>IFC file: {ifcUploadState.file ? ifcUploadState.file.name : 'none'}</li>
             <li>IFC status: {ifcUploadState.status}</li>
             <li>Selected object: none</li>
@@ -74,7 +113,7 @@ function App() {
             <li>Orbit controls: enabled</li>
           </ul>
           <p className={`ifc-state-message is-${ifcUploadState.status}`}>{ifcUploadState.message}</p>
-          <p>下一步會進入 Step 5，整合 IFC loader 解析並顯示模型。</p>
+          <p>此步驟已接上 IFC loader；下一步會補齊 loading / progress / error 的顯示細節。</p>
         </aside>
       </section>
     </main>
