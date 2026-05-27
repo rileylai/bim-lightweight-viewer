@@ -1,0 +1,35 @@
+# 00 - 設計總覽
+
+## 專案定位
+
+本專案是瀏覽器端 BIM 3D scene editor MVP。目標不是完整支援所有 BIM 規格，而是在有限時間內做出可 demo、可說明、可驗證的檢視與編輯流程。
+
+## 核心成功標準
+
+- 使用者可以在瀏覽器上傳 `.ifc` 檔案並看到 3D 模型。
+- 載入期間有 loading / progress 狀態。
+- 模型載入後 camera 自動對準模型。
+- 使用者可以 orbit rotate、pan、zoom。
+- 使用者可以點選模型中的物件並看到高亮。
+- 使用者可以對選取物件 move / rotate / scale。
+- 使用者可以下載 project JSON，保存目前 transform 狀態。
+- 使用者可以開啟 project JSON，還原保存過的 transform。
+- 後續支援 `.glb` / `.gltf` 匯入、選取、transform、刪除與保存。
+
+## MVP 分期
+
+第一階段先完成 IFC viewer/editor 的最小閉環：載入、顯示、選取、transform、儲存、還原。
+
+第二階段再擴充 GLB / GLTF 物件、刪除支援、UI polish、錯誤處理與交件文件。
+
+## 不做的事
+
+- 不加入後端。
+- 不使用資料庫。
+- 不儲存完整 IFC geometry 到 project JSON。
+- 不追求完整 BIM metadata 管理。
+- 不一開始支援超大型 BIM 模型。
+
+## Step 1 相關章節
+
+Step 1 僅建立專案骨架、文件骨架、roadmap 與 placeholder UI，不實作 IFC / GLB 功能。

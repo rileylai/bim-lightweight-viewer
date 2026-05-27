@@ -1,0 +1,131 @@
+.app-shell {
+  min-height: 100vh;
+  padding: 32px;
+  background: #f5f7fb;
+  color: #172033;
+}
+
+.app-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin: 0 auto 24px;
+  max-width: 1180px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #4c667f;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.app-header h1 {
+  margin: 0;
+  color: #172033;
+  font-size: 36px;
+  line-height: 1.15;
+}
+
+.status-pill {
+  border: 1px solid #c8d3df;
+  border-radius: 999px;
+  padding: 6px 12px;
+  background: #ffffff;
+  color: #24435c;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.viewer-placeholder {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 24px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.placeholder-grid {
+  position: relative;
+  min-height: 520px;
+  overflow: hidden;
+  border: 1px solid #d5dde8;
+  border-radius: 8px;
+  background:
+    linear-gradient(rgba(31, 55, 83, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(31, 55, 83, 0.08) 1px, transparent 1px),
+    #ffffff;
+  background-size: 32px 32px;
+}
+
+.placeholder-cube {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 180px;
+  height: 180px;
+  border: 2px solid #2f6f9f;
+  border-radius: 8px;
+  background: rgba(47, 111, 159, 0.12);
+  box-shadow: 38px 28px 0 rgba(63, 137, 104, 0.22);
+  transform: translate(-50%, -50%) rotateX(58deg) rotateZ(42deg);
+}
+
+.placeholder-copy,
+.milestone-list article {
+  border: 1px solid #d5dde8;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 24px;
+}
+
+.placeholder-copy h2,
+.milestone-list h2 {
+  margin: 0 0 12px;
+  color: #172033;
+  font-size: 20px;
+  line-height: 1.25;
+}
+
+.placeholder-copy p,
+.milestone-list p {
+  margin: 0;
+  color: #4c667f;
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.milestone-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  max-width: 1180px;
+  margin: 24px auto 0;
+}
+
+@media (max-width: 860px) {
+  .app-shell {
+    padding: 20px;
+  }
+
+  .app-header,
+  .viewer-placeholder,
+  .milestone-list {
+    grid-template-columns: 1fr;
+  }
+
+  .app-header {
+    display: grid;
+  }
+
+  .viewer-placeholder {
+    display: grid;
+  }
+
+  .placeholder-grid {
+    min-height: 360px;
+  }
+}
