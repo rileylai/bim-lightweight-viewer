@@ -178,7 +178,7 @@ function App() {
           <button type="button" disabled>
             Move / Rotate / Scale (Step 10)
           </button>
-          <span className="status-pill">Step 6</span>
+          <span className="status-pill">Step 7</span>
         </div>
       </header>
 
@@ -221,7 +221,7 @@ function App() {
               </p>
             </section>
           )}
-          <p>此步驟已補上 loading / progress / error 顯示，下一步會強化 camera fit。</p>
+          <p>此步驟已補上模型載入後 camera 自動對焦；下一步會調查 IFC object selection metadata。</p>
         </aside>
       </section>
     </main>
