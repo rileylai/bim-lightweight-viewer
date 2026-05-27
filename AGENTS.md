@@ -72,6 +72,16 @@
   - `docs/02-workflows.md` 中 save / restore 相關章節
   - `docs/01-architecture.md` 中 state / persistence 相關章節
 
+## Step Completion Gate
+
+每個 roadmap step 在標記狀態前，必須通過以下 gate：
+
+- `npm run build` 必須通過。
+- 若是 UI / 3D 相關 step，必須提供可重現的 manual browser validation steps（操作步驟 + 預期結果）。
+- Codex 不可自行宣稱 visual validation 已通過；只有使用者明確確認人工驗證通過，才可標記 `done`。
+- 程式碼已實作但尚未得到使用者人工驗證確認時，status 必須標記為 `implemented_pending_manual_validation`。
+- 若發現 blocker（例如第三方 loader 問題、缺少測試檔、瀏覽器限制），status 必須標記為 `blocked`，並在 roadmap / daily log 記錄具體原因、影響範圍、暫時 workaround。
+
 ## Visual Validation Rule
 
 這是 3D visual application。自動測試與 TypeScript build 不足以代表功能正確。
@@ -84,6 +94,17 @@
 - 點選物件是否高亮。
 - TransformControls 是否正確移動 / 旋轉 / 縮放。
 - save / open project 是否真的還原 transform。
+
+除非使用者已明確回覆人工驗證通過，否則 Codex 只能回報「已實作、待使用者人工驗證」，不可回報為最終驗證通過。
+
+## Do Not 規則
+
+- 不要一次完成多個 roadmap step。
+- 不要加入後端、資料庫或 server-side 儲存。
+- 不要把完整 IFC / GLB geometry 存入 project JSON。
+- 不要大量使用 `any`；若型別不足，先建立明確的 wrapper / adapter type。
+- 不要宣稱未驗證功能已完成。
+- 不要重寫 `dev_state` 歷史紀錄；只能追加新紀錄或更新目前 step 狀態與 pointer。
 
 ## 開發狀態更新規則
 

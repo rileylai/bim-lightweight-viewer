@@ -6,6 +6,22 @@
 
 暫定解法：在 IFC loader step 優先調查 expressID、geometry groups、raycasting metadata，以及 loader 是否提供 element lookup API。
 
+## IFC object-level selection fallback strategy
+
+挑戰：若 loader 最終只能提供「大 mesh 命中」，無法穩定定位單一 BIM element。
+
+fallback demo 方案：
+
+- 第一層：先支援 model-level selection（選整體 IFC model）並可高亮整體模型。
+- 第二層：若能取得 face / fragment metadata，顯示「局部命中資訊」作為 debug 輔助，但不承諾 element-level transform。
+- 第三層：TransformControls 僅 attach 在可穩定識別的 object identity（例如 model root 或已映射 fragment root）。
+
+README 揭露要求：
+
+- 明確說明「目前 IFC selection 精度」是 element-level 或 model-level。
+- 若是 model-level fallback，需寫清楚限制、影響範圍、後續改善方向。
+- demo 說明需避免誤導成完整 BIM element 編輯器。
+
 ## Selection abstraction
 
 挑戰：IFC 與 GLB 的 object identity 來源不同。
