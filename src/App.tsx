@@ -1,35 +1,48 @@
+import ViewerCanvas from './components/ViewerCanvas'
 import './App.css'
 
 function App() {
+  const orbitControlsEnabled = true
+
   return (
     <main className="app-shell">
-      <header className="app-header">
+      <header className="top-toolbar" aria-label="toolbar placeholder">
         <div>
-          <p className="eyebrow">AI Native BIM Demo</p>
+          <p className="eyebrow">BIM Lightweight Viewer MVP</p>
           <h1>BIM 輕量檢視器</h1>
         </div>
-        <span className="status-pill">Step 1</span>
+        <div className="toolbar-actions">
+          <button type="button" disabled>
+            IFC Upload (Step 4)
+          </button>
+          <button type="button" disabled>
+            Move / Rotate / Scale (Step 10)
+          </button>
+          <span className="status-pill">Step 3</span>
+        </div>
       </header>
 
-      <section className="viewer-placeholder" aria-label="3D viewer placeholder">
-        <div className="placeholder-grid">
-          <div className="placeholder-cube" />
-        </div>
-        <div className="placeholder-copy">
-          <h2>3D Canvas Placeholder</h2>
-          <p>下一步會建立基礎 React 版面與 3D canvas。</p>
-        </div>
-      </section>
+      <section className="workspace-layout">
+        <section className="viewer-panel" aria-label="3D viewer area">
+          <div className="viewer-head">
+            <h2>3D Viewer</h2>
+            <p>OrbitControls 已啟用：左鍵旋轉、右鍵平移、滾輪縮放。</p>
+          </div>
+          <div className="viewer-canvas-wrapper">
+            <ViewerCanvas orbitEnabled={orbitControlsEnabled} />
+          </div>
+        </section>
 
-      <section className="milestone-list" aria-label="MVP milestones">
-        <article>
-          <h2>第一階段 MVP</h2>
-          <p>IFC 載入、選取、高亮、TransformControls、project JSON 儲存與還原。</p>
-        </article>
-        <article>
-          <h2>第二階段擴充</h2>
-          <p>GLB / GLTF 匯入、刪除、狀態保存、UI polish 與交件文件整理。</p>
-        </article>
+        <aside className="sidebar-panel" aria-label="sidebar placeholder">
+          <h2>Sidebar Placeholder</h2>
+          <ul>
+            <li>Current model: none</li>
+            <li>Selected object: none</li>
+            <li>Transform mode: disabled</li>
+            <li>Orbit controls: enabled</li>
+          </ul>
+          <p>下一步會進入 Step 4，先完成 IFC 檔案上傳 UI 與基本狀態顯示。</p>
+        </aside>
       </section>
     </main>
   )
