@@ -2,7 +2,13 @@ import { useRef, useState } from 'react'
 import IfcUploadControl from './components/IfcUploadControl'
 import ViewerCanvas from './components/ViewerCanvas'
 import { loadIfcRuntimeModel } from './lib/ifcLoaderRuntime'
-import type { IfcRuntimeModel, IfcUploadState } from './types/ifc'
+import type {
+  IfcLoadProcess,
+  IfcLoadProcessState,
+  IfcLoadProgressState,
+  IfcRuntimeModel,
+  IfcUploadState,
+} from './types/ifc'
 import './App.css'
 
 const initialIfcUploadState: IfcUploadState = {
@@ -11,9 +17,30 @@ const initialIfcUploadState: IfcUploadState = {
   message: '尚未選擇 IFC 檔案。',
 }
 
+const initialIfcLoadProgressState: IfcLoadProgressState = {
+  percent: null,
+  process: null,
+  processState: null,
+  entitiesProcessed: null,
+}
+
+const ifcProcessLabelMap: Record<Exclude<IfcLoadProcess, null>, string> = {
+  conversion: '整體轉換',
+  geometries: '幾何解析',
+  attributes: '屬性解析',
+  relations: '關聯解析',
+}
+
+const ifcProcessStateLabelMap: Record<Exclude<IfcLoadProcessState, null>, string> = {
+  start: '開始',
+  inProgress: '進行中',
+  finish: '完成',
+}
+
 function App() {
   const orbitControlsEnabled = true
   const [ifcUploadState, setIfcUploadState] = useState<IfcUploadState>(initialIfcUploadState)
+  const [ifcLoadProgress, setIfcLoadProgress] = useState<IfcLoadProgressState>(initialIfcLoadProgressState)
   const [ifcRuntimeModel, setIfcRuntimeModel] = useState<IfcRuntimeModel | null>(null)
   const latestLoadRequestIdRef = useRef(0)
 
@@ -25,6 +52,28 @@ function App() {
     return '未知錯誤'
   }
 
+  const normalizeProgressPercent = (progress: number) => {
+    const rawPercent = progress <= 1 ? progress * 100 : progress
+    const clampedPercent = Math.max(0, Math.min(100, rawPercent))
+    return Math.round(clampedPercent)
+  }
+
+  const getIfcProcessLabel = (process: IfcLoadProcess) => {
+    if (!process) {
+      return '準備中'
+    }
+
+    return ifcProcessLabelMap[process]
+  }
+
+  const getIfcProcessStateLabel = (processState: IfcLoadProcessState) => {
+    if (!processState) {
+      return '等待中'
+    }
+
+    return ifcProcessStateLabelMap[processState]
+  }
+
   const handleSelectIfcFile = async (file: File | null) => {
     if (!file) {
       return
@@ -32,6 +81,7 @@ function App() {
 
     const isIfcFile = file.name.toLowerCase().endsWith('.ifc')
     if (!isIfcFile) {
+      setIfcLoadProgress(initialIfcLoadProgressState)
       setIfcUploadState({
         file,
         status: 'invalid',
@@ -40,22 +90,63 @@ function App() {
       return
     }
 
+    const requestId = latestLoadRequestIdRef.current + 1
+    latestLoadRequestIdRef.current = requestId
+
+    setIfcLoadProgress(initialIfcLoadProgressState)
     setIfcUploadState({
       file,
       status: 'loading',
       message: `IFC 解析與載入中：${file.name}`,
     })
 
-    const requestId = latestLoadRequestIdRef.current + 1
-    latestLoadRequestIdRef.current = requestId
-
     try {
-      const loadedIfcModel = await loadIfcRuntimeModel(file)
+      const loadedIfcModel = await loadIfcRuntimeModel(file, (progress, detail) => {
+        if (latestLoadRequestIdRef.current !== requestId) {
+          return
+        }
+
+        const nextProgress: IfcLoadProgressState = {
+          percent: normalizeProgressPercent(progress),
+          process: detail.process ?? null,
+          processState: detail.state ?? null,
+          entitiesProcessed: detail.entitiesProcessed ?? null,
+        }
+
+        setIfcLoadProgress((previousProgress) => {
+          if (
+            previousProgress.percent === nextProgress.percent &&
+            previousProgress.process === nextProgress.process &&
+            previousProgress.processState === nextProgress.processState &&
+            previousProgress.entitiesProcessed === nextProgress.entitiesProcessed
+          ) {
+            return previousProgress
+          }
+
+          return nextProgress
+        })
+
+        const processLabel = getIfcProcessLabel(nextProgress.process)
+        const processStateLabel = getIfcProcessStateLabel(nextProgress.processState)
+        const percentLabel = nextProgress.percent === null ? '--' : `${nextProgress.percent}%`
+
+        setIfcUploadState({
+          file,
+          status: 'loading',
+          message: `IFC 載入中：${processLabel}（${processStateLabel}，${percentLabel}）`,
+        })
+      })
 
       if (latestLoadRequestIdRef.current !== requestId) {
         return
       }
 
+      setIfcLoadProgress((previousProgress) => ({
+        ...previousProgress,
+        percent: 100,
+        process: previousProgress.process ?? 'conversion',
+        processState: 'finish',
+      }))
       setIfcRuntimeModel(loadedIfcModel)
       setIfcUploadState({
         file,
@@ -87,7 +178,7 @@ function App() {
           <button type="button" disabled>
             Move / Rotate / Scale (Step 10)
           </button>
-          <span className="status-pill">Step 5</span>
+          <span className="status-pill">Step 6</span>
         </div>
       </header>
 
@@ -113,7 +204,24 @@ function App() {
             <li>Orbit controls: enabled</li>
           </ul>
           <p className={`ifc-state-message is-${ifcUploadState.status}`}>{ifcUploadState.message}</p>
-          <p>此步驟已接上 IFC loader；下一步會補齊 loading / progress / error 的顯示細節。</p>
+          {ifcUploadState.status === 'loading' && (
+            <section className="ifc-progress-card" aria-label="IFC loading progress">
+              <div className="ifc-progress-head">
+                <strong>IFC Loading Progress</strong>
+                <span>{ifcLoadProgress.percent === null ? '--' : `${ifcLoadProgress.percent}%`}</span>
+              </div>
+              <progress
+                className="ifc-progress-bar"
+                max={100}
+                value={ifcLoadProgress.percent === null ? undefined : ifcLoadProgress.percent}
+              />
+              <p className="ifc-progress-meta">
+                Stage: {getIfcProcessLabel(ifcLoadProgress.process)} / {getIfcProcessStateLabel(ifcLoadProgress.processState)}
+                {ifcLoadProgress.entitiesProcessed === null ? '' : ` / Processed: ${ifcLoadProgress.entitiesProcessed}`}
+              </p>
+            </section>
+          )}
+          <p>此步驟已補上 loading / progress / error 顯示，下一步會強化 camera fit。</p>
         </aside>
       </section>
     </main>

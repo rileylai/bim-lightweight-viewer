@@ -223,6 +223,36 @@
   color: #a23c38;
 }
 
+.ifc-progress-card {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #d8cba2;
+  border-radius: 8px;
+  background: #fffdf6;
+}
+
+.ifc-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: #654f15;
+  font-size: 13px;
+}
+
+.ifc-progress-bar {
+  width: 100%;
+  height: 11px;
+}
+
+.ifc-progress-meta {
+  margin: 8px 0 0;
+  color: #6d613d;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 @media (max-width: 980px) {
   .workspace-layout {
     grid-template-columns: 1fr;
