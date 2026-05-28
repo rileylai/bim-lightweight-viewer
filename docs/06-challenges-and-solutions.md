@@ -31,6 +31,82 @@ Step 4A 補充：
 - 若 localId 可穩定對應到 IFC item，就優先走 Level 2（fragment-level）並在 Step 8 挑戰 Level 3。
 - 若 localId / metadata 不穩定，Step 9~10 僅承諾 Level 1 或 Level 2，不在 MVP 強推 element-level transform。
 
+## Step 8 探針實作（IFC selection metadata）
+
+本輪在 viewer 中加入「點擊探針」流程，目標是確認 IFC 載入後可取得哪些 selection metadata，作為後續正式 selection、highlight、TransformControls 與 save / restore 的基礎。
+
+- 點擊模型後透過 `FragmentsModel.raycast()` 取得命中結果。
+- 探針優先記錄 `localId`、`itemId`、命中點、distance、representation/snapping class。
+- 額外嘗試從 hit object `userData` 與 `getItemsData(localId)` 中搜尋 `expressID` 候選欄位。
+- 若 raycast 未命中，sidebar 會顯示 miss，用來區分「真正沒有點到 IFC 幾何」與「raycast pipeline 沒有正常執行」。
+
+目前策略：
+
+- 若穩定得到 `localId` 但 `expressID` 不穩定，先以 Level 2（fragment/localId-level selection）推進。
+- 若 `localId` 也不穩定，回退 Level 1（model-level selection）並在 README 揭露限制。
+- 不在 MVP 階段強行宣稱完整 IFC element-level selection，除非 raycast metadata 與 object identity 都能穩定驗證。
+
+注意：
+
+- 此探針主要作為 Step 8 調查依據，不等於 Step 9 的正式高亮與選取行為。
+- Step 8 的目標是先確認可取得哪些 IFC metadata，不在此階段實作 highlight、selection state 或 TransformControls。
+
+### Step 8 補充：R3F 預設 raycast 與 fragments 相容性
+
+挑戰：
+
+- 一開始若把點擊事件綁在 R3F 的 `primitive onClick` / `onPointerDown` 路徑下，R3F 事件系統會先對 scene object 執行 Three.js 預設 raycast。
+- 對 ThatOpen Fragments 產生的 IFC 子 mesh 來說，Three.js 預設 `Mesh.raycast()` 可能因 geometry / BufferAttribute 結構不符合預期而拋出 runtime error。
+- 這會導致自訂的 IFC probe 還沒執行，state 就已經被錯誤中斷，sidebar 因此無法更新 hit / miss。
+
+解法：
+
+- Step 8 探針改為 canvas DOM-level pointer event，例如綁在 `gl.domElement`。
+- 這樣可以避開 R3F 物件事件管線，不讓 Three.js 預設 `Mesh.raycast()` 先掃 IFC fragments。
+- DOM pointer event 觸發後，再手動呼叫 `FragmentsModel.raycast()`，讓 IFC hit / miss 探針由 Fragments API 處理。
+
+效果：
+
+- 先前的 `Mesh.raycast` / `BufferAttribute.getX` runtime error 被移除。
+- Probe pipeline 可以正常執行，sidebar 開始能更新 hit / miss。
+- 但這一階段只解決「事件管線被 Three.js 預設 raycast 中斷」的問題，尚不代表 hit location 已完全準確。
+
+### Step 8 診斷追蹤：點房子 miss、點地板 hit
+
+現象：
+
+- 移除 R3F / Three.js runtime error 後，`FragmentsModel.raycast()` 已能執行，也偶爾能回傳 `localId / itemId`。但實際點擊時，房子本體常常顯示 `miss`，反而點擊地板或周邊區域才 `hit`，代表 raycast 射線與畫面滑鼠位置沒有正確對齊。
+
+排查方式：
+
+- 在 viewer pointer handler 加入 `clientX/clientY`、canvas rect、canvas-relative coordinate、NDC、camera 參數與 modelId log；並在 IFC probe utility 加入 `raycast` / `raycastAll` raw result、hit candidate、localId、itemId、point、distance 等 log，用來比對「實際點擊位置」與「raycast 命中點」是否一致。
+
+根因：
+
+- 原本傳入 `FragmentsModel.raycast()` 的座標是 canvas-relative coordinate：
+
+```ts
+clientX = event.clientX - rect.left;
+clientY = event.clientY - rect.top;
+```
+
+但 FragmentsModel.raycast() 同時收到 dom 與 mouse，因此它內部很可能會根據 dom.getBoundingClientRect() 自行轉換座標。外部先轉一次、內部再轉一次，造成重複 offset，導致 raycast 射線偏移。
+
+解法：
+
+- 呼叫 FragmentsModel.raycast() 時改傳原始 browser client coordinate：
+
+```ts
+clientX: event.clientX,
+clientY: event.clientY
+```
+
+- canvas-relative coordinate 只保留給 rect 範圍判斷與 debug log。
+
+結果：
+
+- 修正後 hit area 與畫面點擊位置對齊，點擊 IFC 可見幾何時能穩定更新 hit / miss 與 localId / itemId metadata，Step 8 可作為後續 shared scene object identity model 的基礎。
+
 ## Selection abstraction
 
 挑戰：IFC 與 GLB 的 object identity 來源不同。

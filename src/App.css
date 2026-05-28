@@ -253,6 +253,43 @@
   line-height: 1.5;
 }
 
+.ifc-probe-card {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #cdd9e2;
+  border-radius: 8px;
+  background: #f7fbff;
+}
+
+.ifc-probe-card h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #27445a;
+}
+
+.ifc-probe-card p {
+  margin: 8px 0 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.ifc-probe-card ul {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #2f4b5f;
+  line-height: 1.5;
+}
+
+.ifc-probe-card.is-hit {
+  border-color: #97d2ad;
+  background: #f3fff7;
+}
+
+.ifc-probe-card.is-error {
+  border-color: #e2b9b6;
+  background: #fff6f5;
+}
+
 @media (max-width: 980px) {
   .workspace-layout {
     grid-template-columns: 1fr;

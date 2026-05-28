@@ -1,7 +1,13 @@
 import * as OBC from '@thatopen/components'
-import type { FragmentsModel } from '@thatopen/fragments'
-import type { OrthographicCamera, PerspectiveCamera } from 'three'
-import type { IfcLoadProgressCallback, IfcRuntimeModel } from '../types/ifc'
+import type { FragmentsModel, RaycastResult } from '@thatopen/fragments'
+import { Vector2 } from 'three'
+import type { Object3D, OrthographicCamera, PerspectiveCamera } from 'three'
+import type {
+  IfcLoadProgressCallback,
+  IfcRaycastProbeResult,
+  IfcRuntimeModel,
+  IfcSelectionProbeRequest,
+} from '../types/ifc'
 
 const IFC_WASM_PATH = 'https://unpkg.com/web-ifc@0.0.77/'
 
@@ -19,6 +25,132 @@ let runtimeContext: IfcRuntimeContext | null = null
 let runtimeContextPromise: Promise<IfcRuntimeContext> | null = null
 let queuedCamera: ViewerCamera | null = null
 let modelSerial = 0
+
+const toFixedNumber = (value: number, digits = 4) => Number(value.toFixed(digits))
+
+const toProbeVector = (vector: { x: number; y: number; z: number }) => ({
+  x: toFixedNumber(vector.x),
+  y: toFixedNumber(vector.y),
+  z: toFixedNumber(vector.z),
+})
+
+const isValidNumeric = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
+
+const detectExpressIdFromRecord = (record: Record<string, unknown>) => {
+  const directCandidateKeys = ['expressID', 'expressId', 'ifcExpressID', 'ifcExpressId']
+
+  for (const key of directCandidateKeys) {
+    const candidate = record[key]
+    if (isValidNumeric(candidate)) {
+      return candidate
+    }
+  }
+
+  return null
+}
+
+const detectExpressIdFromItemData = (value: unknown, depth = 0): number | null => {
+  if (depth > 4 || !value || typeof value !== 'object') {
+    return null
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const fromArrayItem = detectExpressIdFromItemData(item, depth + 1)
+      if (fromArrayItem !== null) {
+        return fromArrayItem
+      }
+    }
+
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+  const directCandidate = detectExpressIdFromRecord(record)
+  if (directCandidate !== null) {
+    return directCandidate
+  }
+
+  for (const entry of Object.values(record)) {
+    const nestedCandidate = detectExpressIdFromItemData(entry, depth + 1)
+    if (nestedCandidate !== null) {
+      return nestedCandidate
+    }
+  }
+
+  return null
+}
+
+const getParentTrail = (object: Object3D, maxDepth = 6) => {
+  const trail: string[] = []
+  let current: Object3D | null = object
+  let depth = 0
+
+  while (current && depth < maxDepth) {
+    const objectName = current.name ? current.name : '(unnamed)'
+    trail.push(`${current.type}:${objectName}`)
+    current = current.parent
+    depth += 1
+  }
+
+  return trail
+}
+
+const detectExpressIdFromObjectTree = (object: Object3D) => {
+  let current: Object3D | null = object
+  let depth = 0
+
+  while (current && depth < 6) {
+    const candidate = detectExpressIdFromRecord(current.userData as Record<string, unknown>)
+    if (candidate !== null) {
+      return candidate
+    }
+
+    current = current.parent
+    depth += 1
+  }
+
+  return null
+}
+
+const createProbeResult = (result: IfcRaycastProbeResult): IfcRaycastProbeResult => ({
+  ...result,
+  timestamp: new Date().toISOString(),
+})
+
+const getCameraDebugSnapshot = (camera: ViewerCamera | null) => {
+  if (!camera) {
+    return null
+  }
+
+  return {
+    uuid: camera.uuid,
+    type: camera.type,
+    position: {
+      x: toFixedNumber(camera.position.x),
+      y: toFixedNumber(camera.position.y),
+      z: toFixedNumber(camera.position.z),
+    },
+    rotation: {
+      x: toFixedNumber(camera.rotation.x),
+      y: toFixedNumber(camera.rotation.y),
+      z: toFixedNumber(camera.rotation.z),
+    },
+    near: toFixedNumber(camera.near),
+    far: toFixedNumber(camera.far),
+  }
+}
+
+const summarizeRaycastResult = (hit: RaycastResult) => ({
+  localId: hit.localId,
+  itemId: hit.itemId,
+  point: toProbeVector(hit.point),
+  distance: toFixedNumber(hit.distance),
+  objectType: hit.object?.type ?? null,
+  objectName: hit.object?.name ?? null,
+  representationClass: String(hit.representationClass),
+  snappingClass: String(hit.snappingClass),
+})
 
 const createIfcModelId = (fileName: string) => {
   const normalizedName = fileName
@@ -138,5 +270,141 @@ export const loadIfcRuntimeModel = async (
     modelId,
     fileName: file.name,
     object: fragmentsModel.object,
+  }
+}
+
+export const probeIfcRuntimeSelection = async (
+  request: IfcSelectionProbeRequest,
+): Promise<IfcRaycastProbeResult> => {
+  if (!runtimeContext || !runtimeContext.activeModel) {
+    return createProbeResult({
+      status: 'no-model',
+      message: '目前沒有可探測的 IFC model。',
+      timestamp: null,
+      hit: null,
+    })
+  }
+
+  const model = runtimeContext.activeModel
+
+  try {
+    const rect = request.dom.getBoundingClientRect()
+    const canvasRelativeX = request.clientX - rect.left
+    const canvasRelativeY = request.clientY - rect.top
+
+    const raycastPayload = {
+      camera: request.camera,
+      dom: request.dom,
+      mouse: new Vector2(request.clientX, request.clientY),
+    }
+
+    const cameraIsActive = runtimeContext.activeCamera === request.camera
+
+    // Step 8 診斷：確認 probe 使用的 camera 與 runtime active camera 是否同一個實例。
+    console.log('[IfcProbeDebug] probe request', {
+      modelId: model.modelId,
+      browserClientX: request.clientX,
+      browserClientY: request.clientY,
+      canvasRelativeX: toFixedNumber(canvasRelativeX, 3),
+      canvasRelativeY: toFixedNumber(canvasRelativeY, 3),
+      domRect: {
+        left: toFixedNumber(rect.left, 3),
+        top: toFixedNumber(rect.top, 3),
+        width: toFixedNumber(rect.width, 3),
+        height: toFixedNumber(rect.height, 3),
+      },
+      raycastPayloadMouse: {
+        x: toFixedNumber(raycastPayload.mouse.x, 3),
+        y: toFixedNumber(raycastPayload.mouse.y, 3),
+        space: 'browser-client-coordinate',
+      },
+      cameraIsActive,
+      requestCamera: getCameraDebugSnapshot(request.camera),
+      activeCamera: getCameraDebugSnapshot(runtimeContext.activeCamera),
+    })
+
+    const hit = await model.raycast(raycastPayload)
+
+    // Step 8 診斷：檢查 fragments 單筆 raycast 原始回傳內容。
+    console.log('[IfcProbeDebug] raycast raw result', hit)
+
+    let allHits: RaycastResult[] | null = null
+    try {
+      allHits = await model.raycastAll(raycastPayload)
+      console.log('[IfcProbeDebug] raycastAll raw results', allHits)
+      console.log(
+        '[IfcProbeDebug] raycastAll summary',
+        allHits?.map((candidate) => summarizeRaycastResult(candidate)) ?? null,
+      )
+    } catch (error) {
+      console.warn('[IfcProbeDebug] raycastAll failed', error)
+    }
+
+    console.log('[IfcProbeDebug] selection filter policy', {
+      objectFilter: 'none',
+      representationClassFilter: 'none',
+      snappingClassFilter: 'none',
+    })
+
+    if (!hit) {
+      if (allHits && allHits.length > 0) {
+        console.log('[IfcProbeDebug] raycast miss but raycastAll has candidates', {
+          candidateCount: allHits.length,
+        })
+      }
+
+      return createProbeResult({
+        status: 'miss',
+        message: 'Raycast 未命中 IFC 幾何。',
+        timestamp: null,
+        hit: null,
+      })
+    }
+
+    let itemDataTopLevelKeys: string[] = []
+    let itemDataExpressIdCandidate: number | null = null
+
+    try {
+      const itemData = await model.getItemsData([hit.localId])
+      const firstItemData = itemData[0]
+      if (firstItemData && typeof firstItemData === 'object') {
+        itemDataTopLevelKeys = Object.keys(firstItemData as Record<string, unknown>).slice(0, 12)
+        itemDataExpressIdCandidate = detectExpressIdFromItemData(firstItemData)
+      }
+    } catch (error) {
+      console.warn('[IfcProbe] getItemsData failed', error)
+    }
+
+    console.log('[IfcProbeDebug] selected hit summary', summarizeRaycastResult(hit))
+
+    return createProbeResult({
+      status: 'hit',
+      message: `Raycast 命中 localId=${hit.localId} / itemId=${hit.itemId}`,
+      timestamp: null,
+      hit: {
+        localId: hit.localId,
+        itemId: hit.itemId,
+        distance: toFixedNumber(hit.distance),
+        point: toProbeVector(hit.point),
+        representationClass: String(hit.representationClass),
+        snappingClass: String(hit.snappingClass),
+        objectType: hit.object.type,
+        objectName: hit.object.name || null,
+        objectUuid: hit.object.uuid,
+        objectUserDataKeys: Object.keys(hit.object.userData ?? {}).slice(0, 16),
+        parentObjectTrail: getParentTrail(hit.object),
+        expressIdCandidate: detectExpressIdFromObjectTree(hit.object),
+        itemDataTopLevelKeys,
+        itemDataExpressIdCandidate,
+      },
+    })
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'unknown error'
+    return createProbeResult({
+      status: 'error',
+      message: `Raycast probe 發生錯誤：${errorMessage}`,
+      timestamp: null,
+      hit: null,
+    })
   }
 }

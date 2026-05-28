@@ -6,6 +6,7 @@ import type {
   IfcLoadProcess,
   IfcLoadProcessState,
   IfcLoadProgressState,
+  IfcRaycastProbeResult,
   IfcRuntimeModel,
   IfcUploadState,
 } from './types/ifc'
@@ -22,6 +23,13 @@ const initialIfcLoadProgressState: IfcLoadProgressState = {
   process: null,
   processState: null,
   entitiesProcessed: null,
+}
+
+const initialIfcRaycastProbeState: IfcRaycastProbeResult = {
+  status: 'idle',
+  message: '尚未執行 IFC raycast 探針。',
+  timestamp: null,
+  hit: null,
 }
 
 const ifcProcessLabelMap: Record<Exclude<IfcLoadProcess, null>, string> = {
@@ -42,6 +50,7 @@ function App() {
   const [ifcUploadState, setIfcUploadState] = useState<IfcUploadState>(initialIfcUploadState)
   const [ifcLoadProgress, setIfcLoadProgress] = useState<IfcLoadProgressState>(initialIfcLoadProgressState)
   const [ifcRuntimeModel, setIfcRuntimeModel] = useState<IfcRuntimeModel | null>(null)
+  const [ifcRaycastProbe, setIfcRaycastProbe] = useState<IfcRaycastProbeResult>(initialIfcRaycastProbeState)
   const latestLoadRequestIdRef = useRef(0)
 
   const toErrorMessage = (error: unknown) => {
@@ -74,6 +83,10 @@ function App() {
     return ifcProcessStateLabelMap[processState]
   }
 
+  const handleIfcProbe = (probeResult: IfcRaycastProbeResult) => {
+    setIfcRaycastProbe(probeResult)
+  }
+
   const handleSelectIfcFile = async (file: File | null) => {
     if (!file) {
       return
@@ -82,6 +95,7 @@ function App() {
     const isIfcFile = file.name.toLowerCase().endsWith('.ifc')
     if (!isIfcFile) {
       setIfcLoadProgress(initialIfcLoadProgressState)
+      setIfcRaycastProbe(initialIfcRaycastProbeState)
       setIfcUploadState({
         file,
         status: 'invalid',
@@ -94,6 +108,7 @@ function App() {
     latestLoadRequestIdRef.current = requestId
 
     setIfcLoadProgress(initialIfcLoadProgressState)
+    setIfcRaycastProbe(initialIfcRaycastProbeState)
     setIfcUploadState({
       file,
       status: 'loading',
@@ -178,7 +193,7 @@ function App() {
           <button type="button" disabled>
             Move / Rotate / Scale (Step 10)
           </button>
-          <span className="status-pill">Step 7</span>
+          <span className="status-pill">Step 8</span>
         </div>
       </header>
 
@@ -189,7 +204,7 @@ function App() {
             <p>OrbitControls 已啟用：左鍵旋轉、右鍵平移、滾輪縮放。</p>
           </div>
           <div className="viewer-canvas-wrapper">
-            <ViewerCanvas orbitEnabled={orbitControlsEnabled} ifcModel={ifcRuntimeModel} />
+            <ViewerCanvas orbitEnabled={orbitControlsEnabled} ifcModel={ifcRuntimeModel} onIfcProbe={handleIfcProbe} />
           </div>
         </section>
 
@@ -199,7 +214,7 @@ function App() {
             <li>Current model: {ifcRuntimeModel ? `${ifcRuntimeModel.sourceType}:${ifcRuntimeModel.modelId}` : 'none'}</li>
             <li>IFC file: {ifcUploadState.file ? ifcUploadState.file.name : 'none'}</li>
             <li>IFC status: {ifcUploadState.status}</li>
-            <li>Selected object: none</li>
+            <li>IFC probe status: {ifcRaycastProbe.status}</li>
             <li>Transform mode: disabled</li>
             <li>Orbit controls: enabled</li>
           </ul>
@@ -221,7 +236,32 @@ function App() {
               </p>
             </section>
           )}
-          <p>此步驟已補上模型載入後 camera 自動對焦；下一步會調查 IFC object selection metadata。</p>
+          <section className={`ifc-probe-card is-${ifcRaycastProbe.status}`} aria-label="IFC raycast probe result">
+            <h3>IFC Raycast Probe (Step 8)</h3>
+            <p>{ifcRaycastProbe.message}</p>
+            <p>Timestamp: {ifcRaycastProbe.timestamp ?? '--'}</p>
+            {ifcRaycastProbe.hit ? (
+              <ul>
+                <li>localId: {ifcRaycastProbe.hit.localId ?? 'n/a'}</li>
+                <li>itemId: {ifcRaycastProbe.hit.itemId ?? 'n/a'}</li>
+                <li>expressID (object/userData): {ifcRaycastProbe.hit.expressIdCandidate ?? 'n/a'}</li>
+                <li>expressID (itemData): {ifcRaycastProbe.hit.itemDataExpressIdCandidate ?? 'n/a'}</li>
+                <li>
+                  Point: {ifcRaycastProbe.hit.point ? `${ifcRaycastProbe.hit.point.x}, ${ifcRaycastProbe.hit.point.y}, ${ifcRaycastProbe.hit.point.z}` : 'n/a'}
+                </li>
+                <li>Distance: {ifcRaycastProbe.hit.distance ?? 'n/a'}</li>
+                <li>
+                  Hit object: {ifcRaycastProbe.hit.objectType ?? 'n/a'} / {ifcRaycastProbe.hit.objectName ?? '(unnamed)'}
+                </li>
+                <li>representationClass: {ifcRaycastProbe.hit.representationClass ?? 'n/a'}</li>
+                <li>snappingClass: {ifcRaycastProbe.hit.snappingClass ?? 'n/a'}</li>
+                <li>object userData keys: {ifcRaycastProbe.hit.objectUserDataKeys.join(', ') || 'none'}</li>
+                <li>itemData keys: {ifcRaycastProbe.hit.itemDataTopLevelKeys.join(', ') || 'none'}</li>
+                <li>parent trail: {ifcRaycastProbe.hit.parentObjectTrail.join(' -> ')}</li>
+              </ul>
+            ) : null}
+          </section>
+          <p>Step 8 以點擊探針驗證 IFC selection metadata；下一步再收斂 shared scene object identity model。</p>
         </aside>
       </section>
     </main>
