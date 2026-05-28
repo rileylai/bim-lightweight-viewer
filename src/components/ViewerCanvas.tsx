@@ -1,17 +1,28 @@
-import { useCallback, useEffect, useRef } from 'react'
-import { OrbitControls } from '@react-three/drei'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { OrbitControls, TransformControls } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import type { RefObject } from 'react'
-import type { OrthographicCamera, PerspectiveCamera } from 'three'
-import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib'
+import type { Object3D, OrthographicCamera, PerspectiveCamera } from 'three'
+import type { OrbitControls as OrbitControlsImpl, TransformControls as TransformControlsImpl } from 'three-stdlib'
 import { fitCameraToObject } from '../lib/fitCameraToObject'
 import { bindIfcRuntimeCamera, probeIfcRuntimeSelection, updateIfcRuntimeView } from '../lib/ifcLoaderRuntime'
 import type { IfcRaycastProbeResult, IfcRuntimeModel } from '../types/ifc'
+import { toSceneObjectReference } from '../lib/sceneObjectIdentity'
+import type {
+  SceneObjectIdentity,
+  SceneObjectTransformMode,
+  SceneObjectTransformSnapshot,
+} from '../types/sceneObjectIdentity'
 
 interface ViewerCanvasProps {
   orbitEnabled?: boolean
   ifcModel: IfcRuntimeModel | null
+  selectedObject: SceneObjectIdentity | null
+  transformMode: SceneObjectTransformMode
   onIfcProbe: (result: IfcRaycastProbeResult) => void
+  onTransformModeChange: (mode: SceneObjectTransformMode) => void
+  onTransformDraggingChange: (isDragging: boolean) => void
+  onTransformSnapshotChange: (snapshot: SceneObjectTransformSnapshot | null) => void
 }
 
 interface IfcRuntimeBridgeProps {
@@ -26,6 +37,17 @@ interface CameraFitBridgeProps {
 interface IfcProbeBridgeProps {
   ifcModel: IfcRuntimeModel | null
   onIfcProbe: (result: IfcRaycastProbeResult) => void
+  transformControlsRef: RefObject<TransformControlsImpl | null>
+}
+
+interface TransformControlsBridgeProps {
+  ifcModel: IfcRuntimeModel | null
+  selectedObject: SceneObjectIdentity | null
+  transformMode: SceneObjectTransformMode
+  transformControlsRef: RefObject<TransformControlsImpl | null>
+  onTransformModeChange: (mode: SceneObjectTransformMode) => void
+  onTransformDraggingChange: (isDragging: boolean) => void
+  onTransformSnapshotChange: (snapshot: SceneObjectTransformSnapshot | null) => void
 }
 
 function IfcRuntimeBridge({ ifcModel }: IfcRuntimeBridgeProps) {
@@ -136,12 +158,137 @@ function CameraFitBridge({ ifcModel, orbitControlsRef }: CameraFitBridgeProps) {
   return null
 }
 
-function IfcProbeBridge({ ifcModel, onIfcProbe }: IfcProbeBridgeProps) {
+const createTransformSnapshot = (
+  selectedObject: SceneObjectIdentity,
+  targetObject: Object3D,
+): SceneObjectTransformSnapshot => ({
+  objectRef: toSceneObjectReference(selectedObject),
+  position: [targetObject.position.x, targetObject.position.y, targetObject.position.z],
+  rotation: [targetObject.rotation.x, targetObject.rotation.y, targetObject.rotation.z],
+  scale: [targetObject.scale.x, targetObject.scale.y, targetObject.scale.z],
+})
+
+function TransformControlsBridge({
+  ifcModel,
+  selectedObject,
+  transformMode,
+  transformControlsRef,
+  onTransformModeChange,
+  onTransformDraggingChange,
+  onTransformSnapshotChange,
+}: TransformControlsBridgeProps) {
+  const transformTarget = useMemo(() => {
+    if (!ifcModel || !selectedObject || selectedObject.sourceType !== 'ifc') {
+      return null
+    }
+
+    if (selectedObject.sourceId !== ifcModel.modelId) {
+      return null
+    }
+
+    return ifcModel.object
+  }, [ifcModel, selectedObject])
+
+  const emitTransformSnapshot = useCallback(() => {
+    if (!selectedObject || !transformTarget) {
+      return
+    }
+
+    // Step 10：TransformControls 只更新可序列化的 position/rotation/scale，不在 state 存放 Three runtime reference。
+    onTransformSnapshotChange(createTransformSnapshot(selectedObject, transformTarget))
+  }, [onTransformSnapshotChange, selectedObject, transformTarget])
+
+  const handleTransformMouseDown = useCallback(() => {
+    onTransformDraggingChange(true)
+  }, [onTransformDraggingChange])
+
+  const handleTransformMouseUp = useCallback(() => {
+    onTransformDraggingChange(false)
+    emitTransformSnapshot()
+  }, [emitTransformSnapshot, onTransformDraggingChange])
+
+  useEffect(() => {
+    if (!transformTarget || !selectedObject) {
+      onTransformDraggingChange(false)
+      onTransformSnapshotChange(null)
+      return
+    }
+
+    emitTransformSnapshot()
+  }, [emitTransformSnapshot, onTransformDraggingChange, onTransformSnapshotChange, selectedObject, transformTarget])
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) {
+        return
+      }
+
+      if (event.target instanceof HTMLElement) {
+        const tag = event.target.tagName.toLowerCase()
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || event.target.isContentEditable) {
+          return
+        }
+      }
+
+      const key = event.key.toLowerCase()
+      if (key === 'w') {
+        event.preventDefault()
+        onTransformModeChange('translate')
+        return
+      }
+
+      if (key === 'e') {
+        event.preventDefault()
+        onTransformModeChange('rotate')
+        return
+      }
+
+      if (key === 'r') {
+        event.preventDefault()
+        onTransformModeChange('scale')
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+    }
+  }, [onTransformModeChange])
+
+  if (!transformTarget || !selectedObject) {
+    return null
+  }
+
+  return (
+    <TransformControls
+      ref={transformControlsRef}
+      object={transformTarget}
+      mode={transformMode}
+      onMouseDown={handleTransformMouseDown}
+      onMouseUp={handleTransformMouseUp}
+      onObjectChange={emitTransformSnapshot}
+    />
+  )
+}
+
+function IfcProbeBridge({ ifcModel, onIfcProbe, transformControlsRef }: IfcProbeBridgeProps) {
   const { camera, gl } = useThree()
 
   const runProbeFromPointer = useCallback(
     (event: PointerEvent) => {
       if (!ifcModel || event.button !== 0) {
+        return
+      }
+
+      const transformControls = transformControlsRef.current
+      // Step 10：操作 gizmo（hover/drag）時略過 IFC probe，避免 transform 互動被誤判成場景點選。
+      const transformControlRuntimeState = transformControls as unknown as
+        | {
+            dragging?: boolean
+            axis?: string | null
+          }
+        | null
+      if (transformControlRuntimeState?.dragging || transformControlRuntimeState?.axis) {
         return
       }
 
@@ -228,7 +375,7 @@ function IfcProbeBridge({ ifcModel, onIfcProbe }: IfcProbeBridgeProps) {
         clientY: event.clientY,
       }).then(onIfcProbe)
     },
-    [camera, gl, ifcModel, onIfcProbe],
+    [camera, gl, ifcModel, onIfcProbe, transformControlsRef],
   )
 
   useEffect(() => {
@@ -243,8 +390,18 @@ function IfcProbeBridge({ ifcModel, onIfcProbe }: IfcProbeBridgeProps) {
   return null
 }
 
-function ViewerCanvas({ orbitEnabled = true, ifcModel, onIfcProbe }: ViewerCanvasProps) {
+function ViewerCanvas({
+  orbitEnabled = true,
+  ifcModel,
+  selectedObject,
+  transformMode,
+  onIfcProbe,
+  onTransformModeChange,
+  onTransformDraggingChange,
+  onTransformSnapshotChange,
+}: ViewerCanvasProps) {
   const orbitControlsRef = useRef<OrbitControlsImpl | null>(null)
+  const transformControlsRef = useRef<TransformControlsImpl | null>(null)
 
   return (
     <Canvas camera={{ position: [5.4, 3.8, 5.4], fov: 50, near: 0.1, far: 120 }}>
@@ -270,7 +427,16 @@ function ViewerCanvas({ orbitEnabled = true, ifcModel, onIfcProbe }: ViewerCanva
 
       <IfcRuntimeBridge ifcModel={ifcModel} />
       <CameraFitBridge ifcModel={ifcModel} orbitControlsRef={orbitControlsRef} />
-      <IfcProbeBridge ifcModel={ifcModel} onIfcProbe={onIfcProbe} />
+      <TransformControlsBridge
+        ifcModel={ifcModel}
+        selectedObject={selectedObject}
+        transformMode={transformMode}
+        transformControlsRef={transformControlsRef}
+        onTransformModeChange={onTransformModeChange}
+        onTransformDraggingChange={onTransformDraggingChange}
+        onTransformSnapshotChange={onTransformSnapshotChange}
+      />
+      <IfcProbeBridge ifcModel={ifcModel} onIfcProbe={onIfcProbe} transformControlsRef={transformControlsRef} />
 
       {ifcModel ? (
         <primitive object={ifcModel.object} />

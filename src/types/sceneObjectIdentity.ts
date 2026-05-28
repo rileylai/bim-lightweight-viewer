@@ -57,6 +57,13 @@ export interface SceneObjectTransformSnapshot {
   scale: [number, number, number]
 }
 
+export interface SceneObjectTransformState {
+  mode: SceneObjectTransformMode
+  isDragging: boolean
+  snapshot: SceneObjectTransformSnapshot | null
+  updatedAt: string | null
+}
+
 export interface IfcProbeIdentityInput {
   modelId: string
   fileName: string

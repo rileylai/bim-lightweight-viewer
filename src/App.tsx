@@ -11,7 +11,12 @@ import type {
   IfcRuntimeModel,
   IfcUploadState,
 } from './types/ifc'
-import type { SceneObjectSelectionState } from './types/sceneObjectIdentity'
+import type {
+  SceneObjectSelectionState,
+  SceneObjectTransformMode,
+  SceneObjectTransformSnapshot,
+  SceneObjectTransformState,
+} from './types/sceneObjectIdentity'
 import './App.css'
 
 const initialIfcUploadState: IfcUploadState = {
@@ -39,6 +44,13 @@ const initialSceneObjectSelectionState: SceneObjectSelectionState = {
   updatedAt: null,
 }
 
+const initialSceneObjectTransformState: SceneObjectTransformState = {
+  mode: 'translate',
+  isDragging: false,
+  snapshot: null,
+  updatedAt: null,
+}
+
 const ifcProcessLabelMap: Record<Exclude<IfcLoadProcess, null>, string> = {
   conversion: '整體轉換',
   geometries: '幾何解析',
@@ -53,12 +65,15 @@ const ifcProcessStateLabelMap: Record<Exclude<IfcLoadProcessState, null>, string
 }
 
 function App() {
-  const orbitControlsEnabled = true
+  const [orbitControlsEnabled, setOrbitControlsEnabled] = useState(true)
   const [ifcUploadState, setIfcUploadState] = useState<IfcUploadState>(initialIfcUploadState)
   const [ifcLoadProgress, setIfcLoadProgress] = useState<IfcLoadProgressState>(initialIfcLoadProgressState)
   const [ifcRuntimeModel, setIfcRuntimeModel] = useState<IfcRuntimeModel | null>(null)
   const [ifcRaycastProbe, setIfcRaycastProbe] = useState<IfcRaycastProbeResult>(initialIfcRaycastProbeState)
   const [sceneObjectSelection, setSceneObjectSelection] = useState<SceneObjectSelectionState>(initialSceneObjectSelectionState)
+  const [sceneObjectTransform, setSceneObjectTransform] = useState<SceneObjectTransformState>(
+    initialSceneObjectTransformState,
+  )
   const latestLoadRequestIdRef = useRef(0)
 
   const toErrorMessage = (error: unknown) => {
@@ -106,6 +121,54 @@ function App() {
     await setIfcRuntimeSelectionHighlight(nextSelection.metadata.localId)
   }
 
+  const updateTransformMode = (nextMode: SceneObjectTransformMode) => {
+    setSceneObjectTransform((previousTransformState) => {
+      if (previousTransformState.mode === nextMode) {
+        return previousTransformState
+      }
+
+      return {
+        ...previousTransformState,
+        mode: nextMode,
+        updatedAt: new Date().toISOString(),
+      }
+    })
+  }
+
+  const updateTransformDraggingState = (isDragging: boolean) => {
+    setOrbitControlsEnabled(!isDragging)
+    setSceneObjectTransform((previousTransformState) => {
+      if (previousTransformState.isDragging === isDragging) {
+        return previousTransformState
+      }
+
+      return {
+        ...previousTransformState,
+        isDragging,
+        updatedAt: new Date().toISOString(),
+      }
+    })
+  }
+
+  const updateTransformSnapshot = (snapshot: SceneObjectTransformSnapshot | null) => {
+    setSceneObjectTransform((previousTransformState) => {
+      if (previousTransformState.snapshot === snapshot) {
+        return previousTransformState
+      }
+
+      return {
+        ...previousTransformState,
+        snapshot,
+        updatedAt: new Date().toISOString(),
+      }
+    })
+  }
+
+  const resetTransformState = () => {
+    setOrbitControlsEnabled(true)
+    setSceneObjectTransform(initialSceneObjectTransformState)
+  }
+
   const handleIfcProbe = (probeResult: IfcRaycastProbeResult) => {
     const nextIdentity = mapIfcProbeToSceneObjectIdentity(ifcRuntimeModel, probeResult)
 
@@ -115,6 +178,10 @@ function App() {
     void syncSelectedHighlight(nextIdentity).catch((error: unknown) => {
       console.warn('[IfcSelection] highlight update failed', error)
     })
+
+    if (!nextIdentity) {
+      resetTransformState()
+    }
   }
 
   const handleSelectIfcFile = async (file: File | null) => {
@@ -128,6 +195,7 @@ function App() {
       setIfcLoadProgress(initialIfcLoadProgressState)
       setIfcRaycastProbe(initialIfcRaycastProbeState)
       setSceneObjectSelection(initialSceneObjectSelectionState)
+      resetTransformState()
       setIfcUploadState({
         file,
         status: 'invalid',
@@ -143,6 +211,7 @@ function App() {
     setIfcLoadProgress(initialIfcLoadProgressState)
     setIfcRaycastProbe(initialIfcRaycastProbeState)
     setSceneObjectSelection(initialSceneObjectSelectionState)
+    resetTransformState()
     setIfcUploadState({
       file,
       status: 'loading',
@@ -198,6 +267,7 @@ function App() {
       }))
       setIfcRuntimeModel(loadedIfcModel)
       setSceneObjectSelection(initialSceneObjectSelectionState)
+      resetTransformState()
       setIfcUploadState({
         file,
         status: 'loaded',
@@ -209,6 +279,7 @@ function App() {
       }
 
       void clearIfcRuntimeSelectionHighlight()
+      resetTransformState()
       setIfcUploadState({
         file,
         status: 'error',
@@ -227,9 +298,9 @@ function App() {
         <div className="toolbar-actions">
           <IfcUploadControl uploadState={ifcUploadState} onSelectIfcFile={handleSelectIfcFile} />
           <button type="button" disabled>
-            Move / Rotate / Scale (Step 10)
+            Transform mode: W / E / R（Toolbar 於 Step 11）
           </button>
-          <span className="status-pill">Step 9</span>
+          <span className="status-pill">Step 10</span>
         </div>
       </header>
 
@@ -237,10 +308,19 @@ function App() {
         <section className="viewer-panel" aria-label="3D viewer area">
           <div className="viewer-head">
             <h2>3D Viewer</h2>
-            <p>OrbitControls 已啟用：左鍵旋轉、右鍵平移、滾輪縮放。</p>
+            <p>OrbitControls：左鍵旋轉、右鍵平移、滾輪縮放；TransformControls mode 可用 W/E/R 切換。</p>
           </div>
           <div className="viewer-canvas-wrapper">
-            <ViewerCanvas orbitEnabled={orbitControlsEnabled} ifcModel={ifcRuntimeModel} onIfcProbe={handleIfcProbe} />
+            <ViewerCanvas
+              orbitEnabled={orbitControlsEnabled}
+              ifcModel={ifcRuntimeModel}
+              selectedObject={sceneObjectSelection.selectedObject}
+              transformMode={sceneObjectTransform.mode}
+              onIfcProbe={handleIfcProbe}
+              onTransformModeChange={updateTransformMode}
+              onTransformDraggingChange={updateTransformDraggingState}
+              onTransformSnapshotChange={updateTransformSnapshot}
+            />
           </div>
         </section>
 
@@ -252,8 +332,9 @@ function App() {
             <li>IFC status: {ifcUploadState.status}</li>
             <li>IFC probe status: {ifcRaycastProbe.status}</li>
             <li>Selected identity: {sceneObjectSelection.selectedObject?.identityId ?? 'none'}</li>
-            <li>Transform mode: disabled</li>
-            <li>Orbit controls: enabled</li>
+            <li>Transform mode: {sceneObjectTransform.mode}</li>
+            <li>Transform dragging: {sceneObjectTransform.isDragging ? 'yes' : 'no'}</li>
+            <li>Orbit controls: {orbitControlsEnabled ? 'enabled' : 'disabled while transforming'}</li>
           </ul>
           <p className={`ifc-state-message is-${ifcUploadState.status}`}>{ifcUploadState.message}</p>
           {ifcUploadState.status === 'loading' && (
@@ -316,6 +397,7 @@ function App() {
                 <li>displayLabel: {sceneObjectSelection.selectedObject.displayLabel}</li>
                 {sceneObjectSelection.selectedObject.sourceType === 'ifc' ? (
                   <>
+                    <li>transform target: IFC model root（Step 10 fallback）</li>
                     <li>metadata.localId: {sceneObjectSelection.selectedObject.metadata.localId ?? 'n/a'}</li>
                     <li>metadata.itemId: {sceneObjectSelection.selectedObject.metadata.itemId ?? 'n/a'}</li>
                     <li>metadata.expressId: {sceneObjectSelection.selectedObject.metadata.expressId ?? 'n/a'}</li>
@@ -330,7 +412,39 @@ function App() {
               </ul>
             ) : null}
           </section>
-          <p>Step 9 已把 selection state 接上高亮流程；Step 10 會接續 TransformControls。</p>
+          <section className="ifc-probe-card" aria-label="Transform state">
+            <h3>Transform State (Step 10)</h3>
+            <p>
+              {sceneObjectTransform.snapshot
+                ? '已附加 TransformControls，拖曳後會更新可序列化 transform snapshot。'
+                : '目前沒有可變形目標（需先選取 IFC 物件）。'}
+            </p>
+            <p>Updated at: {sceneObjectTransform.updatedAt ?? '--'}</p>
+            <ul>
+              <li>mode: {sceneObjectTransform.mode}</li>
+              <li>isDragging: {sceneObjectTransform.isDragging ? 'true' : 'false'}</li>
+              <li>snapshot target: {sceneObjectTransform.snapshot?.objectRef.objectKey ?? 'none'}</li>
+              <li>
+                position:{' '}
+                {sceneObjectTransform.snapshot
+                  ? sceneObjectTransform.snapshot.position.map((value) => value.toFixed(4)).join(', ')
+                  : 'n/a'}
+              </li>
+              <li>
+                rotation(rad):{' '}
+                {sceneObjectTransform.snapshot
+                  ? sceneObjectTransform.snapshot.rotation.map((value) => value.toFixed(4)).join(', ')
+                  : 'n/a'}
+              </li>
+              <li>
+                scale:{' '}
+                {sceneObjectTransform.snapshot
+                  ? sceneObjectTransform.snapshot.scale.map((value) => value.toFixed(4)).join(', ')
+                  : 'n/a'}
+              </li>
+            </ul>
+          </section>
+          <p>Step 10 已接上 TransformControls；Step 11 會補上 toolbar mode 切換 UI。</p>
         </aside>
       </section>
     </main>
