@@ -15,8 +15,9 @@
 1. 使用者點擊 canvas。
 2. raycasting 找到候選物件。
 3. 依物件類型判斷 IFC object 或 GLB object。
-4. 更新 selected object state。
-5. 套用高亮材質或 outline。
+4. 將命中結果轉成 shared scene object identity（`sourceType/sourceId/objectKey/identityId`）。
+5. 更新 selected object state（只保存 identity，不保存 Three.js runtime reference）。
+6. 套用高亮材質或 outline。
 
 IFC selection 可能需要 expressID 或 loader 專用 API，不一定能和 GLB 使用完全相同邏輯。
 

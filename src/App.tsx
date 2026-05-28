@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import IfcUploadControl from './components/IfcUploadControl'
 import ViewerCanvas from './components/ViewerCanvas'
 import { loadIfcRuntimeModel } from './lib/ifcLoaderRuntime'
+import { createNextSelectionState, mapIfcProbeToSceneObjectIdentity } from './lib/sceneObjectIdentity'
 import type {
   IfcLoadProcess,
   IfcLoadProcessState,
@@ -10,6 +11,7 @@ import type {
   IfcRuntimeModel,
   IfcUploadState,
 } from './types/ifc'
+import type { SceneObjectSelectionState } from './types/sceneObjectIdentity'
 import './App.css'
 
 const initialIfcUploadState: IfcUploadState = {
@@ -32,6 +34,11 @@ const initialIfcRaycastProbeState: IfcRaycastProbeResult = {
   hit: null,
 }
 
+const initialSceneObjectSelectionState: SceneObjectSelectionState = {
+  selectedObject: null,
+  updatedAt: null,
+}
+
 const ifcProcessLabelMap: Record<Exclude<IfcLoadProcess, null>, string> = {
   conversion: '整體轉換',
   geometries: '幾何解析',
@@ -51,6 +58,7 @@ function App() {
   const [ifcLoadProgress, setIfcLoadProgress] = useState<IfcLoadProgressState>(initialIfcLoadProgressState)
   const [ifcRuntimeModel, setIfcRuntimeModel] = useState<IfcRuntimeModel | null>(null)
   const [ifcRaycastProbe, setIfcRaycastProbe] = useState<IfcRaycastProbeResult>(initialIfcRaycastProbeState)
+  const [sceneObjectSelection, setSceneObjectSelection] = useState<SceneObjectSelectionState>(initialSceneObjectSelectionState)
   const latestLoadRequestIdRef = useRef(0)
 
   const toErrorMessage = (error: unknown) => {
@@ -85,6 +93,9 @@ function App() {
 
   const handleIfcProbe = (probeResult: IfcRaycastProbeResult) => {
     setIfcRaycastProbe(probeResult)
+    setSceneObjectSelection((previousSelection) =>
+      createNextSelectionState(previousSelection, mapIfcProbeToSceneObjectIdentity(ifcRuntimeModel, probeResult)),
+    )
   }
 
   const handleSelectIfcFile = async (file: File | null) => {
@@ -96,6 +107,7 @@ function App() {
     if (!isIfcFile) {
       setIfcLoadProgress(initialIfcLoadProgressState)
       setIfcRaycastProbe(initialIfcRaycastProbeState)
+      setSceneObjectSelection(initialSceneObjectSelectionState)
       setIfcUploadState({
         file,
         status: 'invalid',
@@ -109,6 +121,7 @@ function App() {
 
     setIfcLoadProgress(initialIfcLoadProgressState)
     setIfcRaycastProbe(initialIfcRaycastProbeState)
+    setSceneObjectSelection(initialSceneObjectSelectionState)
     setIfcUploadState({
       file,
       status: 'loading',
@@ -163,6 +176,7 @@ function App() {
         processState: 'finish',
       }))
       setIfcRuntimeModel(loadedIfcModel)
+      setSceneObjectSelection(initialSceneObjectSelectionState)
       setIfcUploadState({
         file,
         status: 'loaded',
@@ -193,7 +207,7 @@ function App() {
           <button type="button" disabled>
             Move / Rotate / Scale (Step 10)
           </button>
-          <span className="status-pill">Step 8</span>
+          <span className="status-pill">Step 8A</span>
         </div>
       </header>
 
@@ -215,6 +229,7 @@ function App() {
             <li>IFC file: {ifcUploadState.file ? ifcUploadState.file.name : 'none'}</li>
             <li>IFC status: {ifcUploadState.status}</li>
             <li>IFC probe status: {ifcRaycastProbe.status}</li>
+            <li>Selected identity: {sceneObjectSelection.selectedObject?.identityId ?? 'none'}</li>
             <li>Transform mode: disabled</li>
             <li>Orbit controls: enabled</li>
           </ul>
@@ -261,7 +276,33 @@ function App() {
               </ul>
             ) : null}
           </section>
-          <p>Step 8 以點擊探針驗證 IFC selection metadata；下一步再收斂 shared scene object identity model。</p>
+          <section className="ifc-probe-card" aria-label="Shared scene object identity">
+            <h3>Shared Scene Object Identity (Step 8A)</h3>
+            <p>
+              {sceneObjectSelection.selectedObject
+                ? `目前已對映 ${sceneObjectSelection.selectedObject.selectionLevel}-level identity。`
+                : '尚未建立可用的 scene object identity。'}
+            </p>
+            <p>Updated at: {sceneObjectSelection.updatedAt ?? '--'}</p>
+            {sceneObjectSelection.selectedObject ? (
+              <ul>
+                <li>identityId: {sceneObjectSelection.selectedObject.identityId}</li>
+                <li>sourceType: {sceneObjectSelection.selectedObject.sourceType}</li>
+                <li>sourceId: {sceneObjectSelection.selectedObject.sourceId}</li>
+                <li>objectKey: {sceneObjectSelection.selectedObject.objectKey}</li>
+                <li>selectionLevel: {sceneObjectSelection.selectedObject.selectionLevel}</li>
+                <li>displayLabel: {sceneObjectSelection.selectedObject.displayLabel}</li>
+                {sceneObjectSelection.selectedObject.sourceType === 'ifc' ? (
+                  <>
+                    <li>metadata.localId: {sceneObjectSelection.selectedObject.metadata.localId ?? 'n/a'}</li>
+                    <li>metadata.itemId: {sceneObjectSelection.selectedObject.metadata.itemId ?? 'n/a'}</li>
+                    <li>metadata.expressId: {sceneObjectSelection.selectedObject.metadata.expressId ?? 'n/a'}</li>
+                  </>
+                ) : null}
+              </ul>
+            ) : null}
+          </section>
+          <p>Step 8A 先統一 scene object identity model；Step 9 再把這個 identity 接到正式 selection/highlight。</p>
         </aside>
       </section>
     </main>

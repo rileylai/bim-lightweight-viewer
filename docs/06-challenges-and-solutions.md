@@ -127,7 +127,20 @@ clientY: event.clientY
 
 挑戰：IFC 與 GLB 的 object identity 來源不同。
 
-暫定解法：建立共用 selected object model，但保留 `sourceType` 與 source-specific metadata。
+Step 8A 實作解法：
+
+- 建立 shared identity contract：`sourceType`、`sourceId`、`objectKey`、`identityId`、`selectionLevel`、`displayLabel`。
+- selected state 僅保存 shared identity，不保存 React/Three runtime instance。
+- IFC probe 命中後先做 normalization：
+  - `sourceType = ifc`
+  - `sourceId = modelId`
+  - `objectKey` 優先 `local:{localId}`，其次 `item:{itemId}`，沒有命中 metadata 時使用 `model-root`
+- `selectionLevel` 由 metadata 完整度決定：
+  - 有 `expressId` 候選：`element`
+  - 只有 `localId/itemId`：`fragment`
+  - 其他：`model`
+
+這樣 Step 9~14 可以直接沿用 `identityId` 與 `objectRef` 做 selection/highlight、transform attach、serialize/restore。
 
 ## Controls 衝突
 

@@ -63,6 +63,24 @@ MVP 先使用 React state 與小型 context 管理。若狀態快速變複雜，
 - project JSON validation。
 - scene object identity mapping（IFC / GLB 共用）。
 
+## Step 8A - Shared Scene Object Identity Model
+
+為了讓 Step 9~14（selection、transform、save/restore）使用同一份 object key，本專案在 Step 8A 先定義共用 identity model：
+
+- 共用主鍵欄位：`sourceType` + `sourceId` + `objectKey`。
+- 衍生穩定識別：`identityId = ${sourceType}:${sourceId}:${objectKey}`。
+- 共用顯示欄位：`selectionLevel`、`displayLabel`。
+- source-specific metadata：
+  - IFC：`modelId`、`localId`、`itemId`、`expressId`、representation/snapping class。
+  - GLB（預留）：`fileName`、`rootObjectId`、`nodePath`。
+
+目前 IFC mapping 規則：
+
+- `sourceType = ifc`
+- `sourceId = modelId`
+- `objectKey` 優先 `local:{localId}`，其次 `item:{itemId}`，都沒有時退回 `model-root`
+- 若 probe 能取得 `expressId` 候選，`selectionLevel` 可提升為 `element`；否則維持 `fragment` 或 `model`
+
 ## Browser-only 限制
 
 所有操作在瀏覽器完成。檔案讀取使用 Browser File API，儲存使用 local JSON download。
