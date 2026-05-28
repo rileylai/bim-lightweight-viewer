@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import IfcUploadControl from './components/IfcUploadControl'
+import TransformModeToolbar from './components/TransformModeToolbar'
 import ViewerCanvas from './components/ViewerCanvas'
 import { clearIfcRuntimeSelectionHighlight, loadIfcRuntimeModel, setIfcRuntimeSelectionHighlight } from './lib/ifcLoaderRuntime'
 import { createNextSelectionState, mapIfcProbeToSceneObjectIdentity } from './lib/sceneObjectIdentity'
@@ -169,6 +170,8 @@ function App() {
     setSceneObjectTransform(initialSceneObjectTransformState)
   }
 
+  const hasTransformTarget = sceneObjectSelection.selectedObject?.sourceType === 'ifc'
+
   const handleIfcProbe = (probeResult: IfcRaycastProbeResult) => {
     const nextIdentity = mapIfcProbeToSceneObjectIdentity(ifcRuntimeModel, probeResult)
 
@@ -297,10 +300,12 @@ function App() {
         </div>
         <div className="toolbar-actions">
           <IfcUploadControl uploadState={ifcUploadState} onSelectIfcFile={handleSelectIfcFile} />
-          <button type="button" disabled>
-            Transform mode: W / E / R（Toolbar 於 Step 11）
-          </button>
-          <span className="status-pill">Step 10</span>
+          <TransformModeToolbar
+            mode={sceneObjectTransform.mode}
+            disabled={!hasTransformTarget}
+            onModeChange={updateTransformMode}
+          />
+          <span className="status-pill">Step 11</span>
         </div>
       </header>
 
@@ -308,7 +313,7 @@ function App() {
         <section className="viewer-panel" aria-label="3D viewer area">
           <div className="viewer-head">
             <h2>3D Viewer</h2>
-            <p>OrbitControls：左鍵旋轉、右鍵平移、滾輪縮放；TransformControls mode 可用 W/E/R 切換。</p>
+            <p>OrbitControls：左鍵旋轉、右鍵平移、滾輪縮放；Transform mode 可由 toolbar 或 W/E/R 快捷鍵切換。</p>
           </div>
           <div className="viewer-canvas-wrapper">
             <ViewerCanvas
@@ -423,6 +428,7 @@ function App() {
             <ul>
               <li>mode: {sceneObjectTransform.mode}</li>
               <li>isDragging: {sceneObjectTransform.isDragging ? 'true' : 'false'}</li>
+              <li>toolbar enabled: {hasTransformTarget ? 'true' : 'false (請先選取 IFC 物件)'}</li>
               <li>snapshot target: {sceneObjectTransform.snapshot?.objectRef.objectKey ?? 'none'}</li>
               <li>
                 position:{' '}
@@ -444,7 +450,7 @@ function App() {
               </li>
             </ul>
           </section>
-          <p>Step 10 已接上 TransformControls；Step 11 會補上 toolbar mode 切換 UI。</p>
+          <p>Step 11 已補上 toolbar mode 切換 UI，並與 TransformControls mode 狀態同步。</p>
         </aside>
       </section>
     </main>
