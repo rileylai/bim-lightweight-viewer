@@ -1,6 +1,7 @@
 import * as OBC from '@thatopen/components'
-import type { FragmentsModel, RaycastResult } from '@thatopen/fragments'
-import { Vector2 } from 'three'
+import { RenderedFaces } from '@thatopen/fragments'
+import type { FragmentsModel, MaterialDefinition, RaycastResult } from '@thatopen/fragments'
+import { Color, Vector2 } from 'three'
 import type { Object3D, OrthographicCamera, PerspectiveCamera } from 'three'
 import type {
   IfcLoadProgressCallback,
@@ -25,6 +26,17 @@ let runtimeContext: IfcRuntimeContext | null = null
 let runtimeContextPromise: Promise<IfcRuntimeContext> | null = null
 let queuedCamera: ViewerCamera | null = null
 let modelSerial = 0
+let activeHighlightLocalId: number | null = null
+let isModelWideHighlightActive = false
+
+const IFC_SELECTED_HIGHLIGHT_MATERIAL: MaterialDefinition = {
+  color: new Color('#ff9f40'),
+  renderedFaces: RenderedFaces.TWO,
+  opacity: 0.72,
+  transparent: true,
+  // Step 9：不能搭配 preserveOriginalMaterial=true 且缺 _explicitProps，否則 fragments 會保留原材質而看不到高亮。
+  preserveOriginalMaterial: false,
+}
 
 const toFixedNumber = (value: number, digits = 4) => Number(value.toFixed(digits))
 
@@ -235,6 +247,58 @@ export const updateIfcRuntimeView = () => {
   return runtimeContext.fragments.core.update()
 }
 
+const resetActiveIfcHighlight = async (model: FragmentsModel) => {
+  if (isModelWideHighlightActive) {
+    await model.resetHighlight()
+    isModelWideHighlightActive = false
+    activeHighlightLocalId = null
+    return
+  }
+
+  if (activeHighlightLocalId === null) {
+    return
+  }
+
+  await model.resetHighlight([activeHighlightLocalId])
+  activeHighlightLocalId = null
+}
+
+export const clearIfcRuntimeSelectionHighlight = async () => {
+  if (!runtimeContext || !runtimeContext.activeModel) {
+    activeHighlightLocalId = null
+    isModelWideHighlightActive = false
+    return
+  }
+
+  await resetActiveIfcHighlight(runtimeContext.activeModel)
+}
+
+export const setIfcRuntimeSelectionHighlight = async (localId: number | null) => {
+  if (!runtimeContext || !runtimeContext.activeModel) {
+    return
+  }
+
+  const model = runtimeContext.activeModel
+
+  if (localId !== null && !isModelWideHighlightActive && activeHighlightLocalId === localId) {
+    return
+  }
+
+  await resetActiveIfcHighlight(model)
+
+  if (localId === null) {
+    // 若只有 model-level identity（沒有 localId），先以整體模型高亮做 fallback，避免「已選取但無視覺回饋」。
+    await model.highlight(undefined, IFC_SELECTED_HIGHLIGHT_MATERIAL)
+    isModelWideHighlightActive = true
+    activeHighlightLocalId = null
+    return
+  }
+
+  await model.highlight([localId], IFC_SELECTED_HIGHLIGHT_MATERIAL)
+  activeHighlightLocalId = localId
+  isModelWideHighlightActive = false
+}
+
 export const loadIfcRuntimeModel = async (
   file: File,
   onProgress?: IfcLoadProgressCallback,
@@ -263,6 +327,8 @@ export const loadIfcRuntimeModel = async (
   }
 
   context.activeModel = fragmentsModel
+  activeHighlightLocalId = null
+  isModelWideHighlightActive = false
   context.fragments.core.update(true)
 
   return {

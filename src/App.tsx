@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import IfcUploadControl from './components/IfcUploadControl'
 import ViewerCanvas from './components/ViewerCanvas'
-import { loadIfcRuntimeModel } from './lib/ifcLoaderRuntime'
+import { clearIfcRuntimeSelectionHighlight, loadIfcRuntimeModel, setIfcRuntimeSelectionHighlight } from './lib/ifcLoaderRuntime'
 import { createNextSelectionState, mapIfcProbeToSceneObjectIdentity } from './lib/sceneObjectIdentity'
 import type {
   IfcLoadProcess,
@@ -91,11 +91,30 @@ function App() {
     return ifcProcessStateLabelMap[processState]
   }
 
+  const syncSelectedHighlight = async (nextSelection: SceneObjectSelectionState['selectedObject']) => {
+    if (!ifcRuntimeModel || !nextSelection || nextSelection.sourceType !== 'ifc') {
+      await clearIfcRuntimeSelectionHighlight()
+      return
+    }
+
+    if (nextSelection.sourceId !== ifcRuntimeModel.modelId) {
+      await clearIfcRuntimeSelectionHighlight()
+      return
+    }
+
+    // Step 9：選取命中後以 localId 高亮；若 localId 不可用則由 runtime fallback 到 model-level highlight。
+    await setIfcRuntimeSelectionHighlight(nextSelection.metadata.localId)
+  }
+
   const handleIfcProbe = (probeResult: IfcRaycastProbeResult) => {
+    const nextIdentity = mapIfcProbeToSceneObjectIdentity(ifcRuntimeModel, probeResult)
+
     setIfcRaycastProbe(probeResult)
-    setSceneObjectSelection((previousSelection) =>
-      createNextSelectionState(previousSelection, mapIfcProbeToSceneObjectIdentity(ifcRuntimeModel, probeResult)),
-    )
+    setSceneObjectSelection((previousSelection) => createNextSelectionState(previousSelection, nextIdentity))
+
+    void syncSelectedHighlight(nextIdentity).catch((error: unknown) => {
+      console.warn('[IfcSelection] highlight update failed', error)
+    })
   }
 
   const handleSelectIfcFile = async (file: File | null) => {
@@ -105,6 +124,7 @@ function App() {
 
     const isIfcFile = file.name.toLowerCase().endsWith('.ifc')
     if (!isIfcFile) {
+      void clearIfcRuntimeSelectionHighlight()
       setIfcLoadProgress(initialIfcLoadProgressState)
       setIfcRaycastProbe(initialIfcRaycastProbeState)
       setSceneObjectSelection(initialSceneObjectSelectionState)
@@ -119,6 +139,7 @@ function App() {
     const requestId = latestLoadRequestIdRef.current + 1
     latestLoadRequestIdRef.current = requestId
 
+    void clearIfcRuntimeSelectionHighlight()
     setIfcLoadProgress(initialIfcLoadProgressState)
     setIfcRaycastProbe(initialIfcRaycastProbeState)
     setSceneObjectSelection(initialSceneObjectSelectionState)
@@ -187,6 +208,7 @@ function App() {
         return
       }
 
+      void clearIfcRuntimeSelectionHighlight()
       setIfcUploadState({
         file,
         status: 'error',
@@ -207,7 +229,7 @@ function App() {
           <button type="button" disabled>
             Move / Rotate / Scale (Step 10)
           </button>
-          <span className="status-pill">Step 8A</span>
+          <span className="status-pill">Step 9</span>
         </div>
       </header>
 
@@ -276,12 +298,12 @@ function App() {
               </ul>
             ) : null}
           </section>
-          <section className="ifc-probe-card" aria-label="Shared scene object identity">
-            <h3>Shared Scene Object Identity (Step 8A)</h3>
+          <section className="ifc-probe-card" aria-label="Selected object state">
+            <h3>Selected Object (Step 9)</h3>
             <p>
               {sceneObjectSelection.selectedObject
-                ? `目前已對映 ${sceneObjectSelection.selectedObject.selectionLevel}-level identity。`
-                : '尚未建立可用的 scene object identity。'}
+                ? `目前選取 ${sceneObjectSelection.selectedObject.selectionLevel}-level 物件，已套用高亮。`
+                : '目前沒有選取物件，已清除高亮。'}
             </p>
             <p>Updated at: {sceneObjectSelection.updatedAt ?? '--'}</p>
             {sceneObjectSelection.selectedObject ? (
@@ -297,12 +319,18 @@ function App() {
                     <li>metadata.localId: {sceneObjectSelection.selectedObject.metadata.localId ?? 'n/a'}</li>
                     <li>metadata.itemId: {sceneObjectSelection.selectedObject.metadata.itemId ?? 'n/a'}</li>
                     <li>metadata.expressId: {sceneObjectSelection.selectedObject.metadata.expressId ?? 'n/a'}</li>
+                    <li>
+                      highlight policy:{' '}
+                      {sceneObjectSelection.selectedObject.metadata.localId === null
+                        ? 'model-level fallback'
+                        : 'localId-level highlight'}
+                    </li>
                   </>
                 ) : null}
               </ul>
             ) : null}
           </section>
-          <p>Step 8A 先統一 scene object identity model；Step 9 再把這個 identity 接到正式 selection/highlight。</p>
+          <p>Step 9 已把 selection state 接上高亮流程；Step 10 會接續 TransformControls。</p>
         </aside>
       </section>
     </main>

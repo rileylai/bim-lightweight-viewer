@@ -142,6 +142,25 @@ Step 8A 實作解法：
 
 這樣 Step 9~14 可以直接沿用 `identityId` 與 `objectRef` 做 selection/highlight、transform attach、serialize/restore。
 
+### Step 9 實作補充：IFC 高亮策略
+
+本輪把 shared identity 正式接到高亮流程：
+
+- 點擊命中後，先更新 selected state（`identityId/sourceType/sourceId/objectKey`）。
+- 若 identity 為 IFC 且有 `localId`，呼叫 fragments `highlight([localId], material)` 做 localId-level 高亮。
+- 切換選取時先 `resetHighlight()` 舊目標，再高亮新目標，避免殘留。
+- 點擊 miss 或清空選取時，呼叫 `clear highlight`。
+
+fallback：
+
+- 若 identity 是 IFC 但沒有可用 `localId`，改用 model-level highlight（`highlight(undefined, material)`）確保仍有視覺回饋。
+
+驗證失敗後補充（2026-05-28）：
+
+- 問題：selected state 有更新，但畫面看不到高亮。
+- 根因：highlight material 若設定 `preserveOriginalMaterial: true`，但沒有提供 `_explicitProps`，fragments 內部會保留原材質屬性，導致視覺上等同未高亮。
+- 修正：Step 9 高亮材質改為 `preserveOriginalMaterial: false`，並調整為半透明橘色（`opacity: 0.72`, `transparent: true`），提高可見度。
+
 ## Controls 衝突
 
 挑戰：TransformControls 拖曳時，OrbitControls 也可能響應滑鼠事件。
