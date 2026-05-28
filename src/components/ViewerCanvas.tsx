@@ -53,16 +53,52 @@ function IfcRuntimeBridge({ ifcModel }: IfcRuntimeBridgeProps) {
 
 function CameraFitBridge({ ifcModel, orbitControlsRef }: CameraFitBridgeProps) {
   const { camera, size } = useThree()
+  const fittedModelIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!ifcModel) {
+      // 當前場景沒有 IFC model 時重置 fit 記錄，避免下次載入新模型被誤判為已完成。
+      fittedModelIdRef.current = null
+    }
+  }, [ifcModel])
 
   useEffect(() => {
     if (!ifcModel || !ifcModel.object || size.width <= 0 || size.height <= 0) {
       return
     }
 
+    if (fittedModelIdRef.current === ifcModel.modelId) {
+      return
+    }
+
+    let timeout100Id: number | null = null
+    let timeout300Id: number | null = null
+
+    const clearDelayedFits = () => {
+      if (timeout100Id !== null) {
+        window.clearTimeout(timeout100Id)
+        timeout100Id = null
+      }
+
+      if (timeout300Id !== null) {
+        window.clearTimeout(timeout300Id)
+        timeout300Id = null
+      }
+    }
+
     const runFit = (trigger: 'raf' | 'timeout-100ms' | 'timeout-300ms') => {
+      if (fittedModelIdRef.current === ifcModel.modelId) {
+        return true
+      }
+
       const fitApplied = fitCameraToObject(camera, ifcModel.object, {
         controls: orbitControlsRef.current,
       })
+
+      if (fitApplied) {
+        fittedModelIdRef.current = ifcModel.modelId
+        return true
+      }
 
       if (!fitApplied) {
         console.warn('[CameraFit] fit failed', {
@@ -70,18 +106,30 @@ function CameraFitBridge({ ifcModel, orbitControlsRef }: CameraFitBridgeProps) {
           modelId: ifcModel.modelId,
         })
       }
+
+      return false
     }
 
     const frameId = window.requestAnimationFrame(() => {
-      runFit('raf')
+      const rafFitApplied = runFit('raf')
+      if (rafFitApplied) {
+        clearDelayedFits()
+      }
     })
-    const timeout100 = window.setTimeout(() => runFit('timeout-100ms'), 100)
-    const timeout300 = window.setTimeout(() => runFit('timeout-300ms'), 300)
+    timeout100Id = window.setTimeout(() => {
+      const timeout100FitApplied = runFit('timeout-100ms')
+      if (timeout100FitApplied && timeout300Id !== null) {
+        window.clearTimeout(timeout300Id)
+        timeout300Id = null
+      }
+    }, 100)
+    timeout300Id = window.setTimeout(() => {
+      runFit('timeout-300ms')
+    }, 300)
 
     return () => {
       window.cancelAnimationFrame(frameId)
-      window.clearTimeout(timeout100)
-      window.clearTimeout(timeout300)
+      clearDelayedFits()
     }
   }, [camera, ifcModel, orbitControlsRef, size])
 
@@ -205,14 +253,12 @@ function ViewerCanvas({ orbitEnabled = true, ifcModel, onIfcProbe }: ViewerCanva
         makeDefault
         ref={orbitControlsRef}
         enabled={orbitEnabled}
-        target={[0, 0.2, 0]}
+        // 由 fitCameraToObject 以 imperative 方式維護 target/min/maxDistance，避免 React re-render 覆寫後造成視角跳動。
         enableDamping
         dampingFactor={0.08}
         rotateSpeed={0.72}
         panSpeed={0.88}
         zoomSpeed={0.9}
-        minDistance={0.25}
-        maxDistance={5000}
       />
 
       <color attach="background" args={["#ecf2f8"]} />
