@@ -107,6 +107,22 @@ clientY: event.clientY
 
 - 修正後 hit area 與畫面點擊位置對齊，點擊 IFC 可見幾何時能穩定更新 hit / miss 與 localId / itemId metadata，Step 8 可作為後續 shared scene object identity model 的基礎。
 
+### Step 8 補充：Fragments runtime 更新時序
+
+現象：
+
+- 即使座標空間修正後，若 camera 剛移動且 fragments tile/request 尚未同步完成，仍可能出現「畫面看得到幾何但當下 raycast miss」。
+
+解法：
+
+- 在 `probeIfcRuntimeSelection()` 執行 raycast 前，先呼叫 `fragments.core.update(true)` 強制完成 pending request。
+- 在 DOM pointer 事件觸發 probe 前，再次 `bindIfcRuntimeCamera(currentCamera)`，避免 runtime 使用過期 camera 參考。
+
+結果與限制：
+
+- 這個修補主要降低「更新時序造成的暫時 miss」；是否完全解決命中精度仍需人工點擊 roof/wall/column/floor/background 驗證。
+- `update(true)` 可能增加單次點擊延遲，因此目前僅作為 Step 8 探針穩定性補強，不代表最終 production 策略已定案。
+
 ## Selection abstraction
 
 挑戰：IFC 與 GLB 的 object identity 來源不同。

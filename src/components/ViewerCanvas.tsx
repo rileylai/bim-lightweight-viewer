@@ -45,7 +45,7 @@ function IfcRuntimeBridge({ ifcModel }: IfcRuntimeBridgeProps) {
       return
     }
 
-    updateIfcRuntimeView()
+    void updateIfcRuntimeView()
   })
 
   return null
@@ -168,6 +168,9 @@ function IfcProbeBridge({ ifcModel, onIfcProbe }: IfcProbeBridgeProps) {
       if (!pointerInsideRect) {
         return
       }
+
+      // Step 8 補強：點擊時再次綁定目前 camera，避免 runtime 使用過期相機狀態。
+      bindIfcRuntimeCamera(camera as PerspectiveCamera | OrthographicCamera)
 
       // Step 8 探針：避免 R3F 物件事件預設 raycast，改用 DOM pointer 並傳 browser client 座標給 fragments raycast。
       void probeIfcRuntimeSelection({

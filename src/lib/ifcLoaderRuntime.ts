@@ -229,10 +229,10 @@ export const bindIfcRuntimeCamera = (camera: ViewerCamera) => {
 
 export const updateIfcRuntimeView = () => {
   if (!runtimeContext || !runtimeContext.activeModel) {
-    return
+    return Promise.resolve()
   }
 
-  runtimeContext.fragments.core.update()
+  return runtimeContext.fragments.core.update()
 }
 
 export const loadIfcRuntimeModel = async (
@@ -299,6 +299,9 @@ export const probeIfcRuntimeSelection = async (
     }
 
     const cameraIsActive = runtimeContext.activeCamera === request.camera
+
+    // Step 8 補強：在 raycast 前先強制同步 fragments pending requests，降低視圖更新時序造成的 miss 偏差。
+    await runtimeContext.fragments.core.update(true)
 
     // Step 8 診斷：確認 probe 使用的 camera 與 runtime active camera 是否同一個實例。
     console.log('[IfcProbeDebug] probe request', {
