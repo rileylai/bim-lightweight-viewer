@@ -230,13 +230,26 @@
 ### Step 14 - Open project JSON and restore IFC transforms
 
 操作步驟：
-1. 先改變物件 transform 並儲存一份 JSON。
-1. 重新整理或重載模型。
-1. 開啟剛保存的 JSON。
+1. 先 `Upload IFC` 載入 `Building-Architecture.ifc`，確認狀態為 loaded。
+1. 選取任一物件後做一次明顯 transform（例如沿 X 軸平移 +2），記住目前位置。
+1. 點擊 `Save Project JSON` 下載一份 JSON。
+1. 重新整理頁面（或重新 `Upload IFC`）回到初始位置。
+1. 再次 `Upload IFC` 載入同一個 IFC 檔案。
+1. 點擊 `Open Project JSON`，上傳第 3 步下載的 JSON。
+1. 觀察模型是否回到第 2 步的 transform 狀態。
+1. 再做錯誤案例：上傳一個缺少必要欄位（例如刪掉 `sources`）的 JSON。
 
 預期結果：
-1. transform 能還原到保存時狀態。
-1. 若缺欄位或 object 不存在，會有可理解訊息且不崩潰。
+1. 有明確區分兩個檔案流程：
+1. `IFC Upload` 是載入模型本體。
+1. `Open Project JSON` 是還原保存過的 transform 狀態。
+1. 正常 JSON 會成功還原 transform，且 sidebar 的 `Project Open State (Step 14)` 顯示 restored 與匹配筆數。
+1. 若 JSON 缺欄位或 version/schema 不符，會顯示可理解錯誤訊息，app 不崩潰。
+
+建議人工驗收結論模板（可直接貼回覆）：
+1. Step 14 IFC + JSON 雙檔流程理解檢查：pass/fail
+1. Step 14 restore 回到保存位置檢查：pass/fail
+1. Step 14 錯誤 JSON 訊息可理解檢查：pass/fail
 
 ### Step 15 - Ctrl+S quick save
 

@@ -1,11 +1,14 @@
 import { useRef, useState } from 'react'
 import IfcUploadControl from './components/IfcUploadControl'
+import ProjectJsonOpenControl from './components/ProjectJsonOpenControl'
 import TransformModeToolbar from './components/TransformModeToolbar'
 import ViewerCanvas from './components/ViewerCanvas'
 import { clearIfcRuntimeSelectionHighlight, loadIfcRuntimeModel, setIfcRuntimeSelectionHighlight } from './lib/ifcLoaderRuntime'
 import {
+  cloneProjectTransformRecord,
   createProjectDownloadFileName,
   downloadProjectJsonDocument,
+  restoreIfcModelTransformFromProject,
   serializeProjectDocument,
   upsertProjectTransformRecord,
 } from './lib/projectPersistence'
@@ -19,7 +22,7 @@ import type {
   IfcRuntimeModel,
   IfcUploadState,
 } from './types/ifc'
-import type { ProjectObjectTransformRecord } from './types/project'
+import type { ProjectJsonDocument, ProjectObjectTransformRecord } from './types/project'
 import type {
   SceneObjectSelectionState,
   SceneObjectTransformMode,
@@ -74,6 +77,26 @@ const initialProjectSaveState: ProjectSaveState = {
   updatedAt: null,
 }
 
+interface ProjectOpenState {
+  status: 'idle' | 'restored' | 'error'
+  message: string
+  openedFileName: string | null
+  matchedTransformCount: number
+  skippedTransformCount: number
+  appliedObjectKey: string | null
+  updatedAt: string | null
+}
+
+const initialProjectOpenState: ProjectOpenState = {
+  status: 'idle',
+  message: '尚未開啟 project JSON。',
+  openedFileName: null,
+  matchedTransformCount: 0,
+  skippedTransformCount: 0,
+  appliedObjectKey: null,
+  updatedAt: null,
+}
+
 const ifcProcessLabelMap: Record<Exclude<IfcLoadProcess, null>, string> = {
   conversion: '整體轉換',
   geometries: '幾何解析',
@@ -99,6 +122,7 @@ function App() {
   )
   const [projectTransformRecords, setProjectTransformRecords] = useState<ProjectObjectTransformRecord[]>([])
   const [projectSaveState, setProjectSaveState] = useState<ProjectSaveState>(initialProjectSaveState)
+  const [projectOpenState, setProjectOpenState] = useState<ProjectOpenState>(initialProjectOpenState)
   const latestLoadRequestIdRef = useRef(0)
 
   const toErrorMessage = (error: unknown) => {
@@ -193,7 +217,11 @@ function App() {
     })
   }
 
-  const resetTransformState = (options?: { clearTransformRecords?: boolean; clearProjectSaveState?: boolean }) => {
+  const resetTransformState = (options?: {
+    clearTransformRecords?: boolean
+    clearProjectSaveState?: boolean
+    clearProjectOpenState?: boolean
+  }) => {
     setOrbitControlsEnabled(true)
     setSceneObjectTransform(initialSceneObjectTransformState)
 
@@ -203,6 +231,10 @@ function App() {
 
     if (options?.clearProjectSaveState) {
       setProjectSaveState(initialProjectSaveState)
+    }
+
+    if (options?.clearProjectOpenState) {
+      setProjectOpenState(initialProjectOpenState)
     }
   }
 
@@ -249,6 +281,135 @@ function App() {
     })
   }
 
+  const syncTransformSnapshotFromRestore = (appliedTransform: ProjectObjectTransformRecord, nowIso: string) => {
+    setSceneObjectTransform((previousTransformState) => {
+      const previousSnapshot = previousTransformState.snapshot
+      if (
+        !previousSnapshot ||
+        previousSnapshot.objectRef.sourceType !== 'ifc' ||
+        previousSnapshot.objectRef.sourceId !== appliedTransform.objectRef.sourceId
+      ) {
+        return previousTransformState
+      }
+
+      return {
+        ...previousTransformState,
+        snapshot: {
+          ...previousSnapshot,
+          position: [...appliedTransform.position],
+          rotation: [...appliedTransform.rotation],
+          scale: [...appliedTransform.scale],
+        },
+        updatedAt: nowIso,
+      }
+    })
+  }
+
+  const handleSelectProjectJsonFile = async (file: File | null) => {
+    if (!file) {
+      return
+    }
+
+    const nowIso = new Date().toISOString()
+    const isJsonFile = file.name.toLowerCase().endsWith('.json')
+    if (!isJsonFile) {
+      setProjectOpenState({
+        status: 'error',
+        message: '檔案格式錯誤：請選擇 .json 的 project 檔案。',
+        openedFileName: file.name,
+        matchedTransformCount: 0,
+        skippedTransformCount: 0,
+        appliedObjectKey: null,
+        updatedAt: nowIso,
+      })
+      return
+    }
+
+    let parsedProjectDocument: unknown
+
+    try {
+      const rawText = await file.text()
+      parsedProjectDocument = JSON.parse(rawText)
+    } catch (error) {
+      setProjectOpenState({
+        status: 'error',
+        message: `讀取 project JSON 失敗：${toErrorMessage(error)}`,
+        openedFileName: file.name,
+        matchedTransformCount: 0,
+        skippedTransformCount: 0,
+        appliedObjectKey: null,
+        updatedAt: nowIso,
+      })
+      return
+    }
+
+    const validationErrors = getProjectJsonValidationErrors(parsedProjectDocument)
+    if (validationErrors.length > 0) {
+      setProjectOpenState({
+        status: 'error',
+        message: `project JSON 驗證失敗：${validationErrors.join('；')}`,
+        openedFileName: file.name,
+        matchedTransformCount: 0,
+        skippedTransformCount: 0,
+        appliedObjectKey: null,
+        updatedAt: nowIso,
+      })
+      return
+    }
+
+    const projectDocument = parsedProjectDocument as ProjectJsonDocument
+
+    if (!ifcRuntimeModel) {
+      setProjectOpenState({
+        status: 'error',
+        message: '請先使用 IFC Upload 載入對應模型，再開啟 project JSON 還原 transform。',
+        openedFileName: file.name,
+        matchedTransformCount: 0,
+        skippedTransformCount: 0,
+        appliedObjectKey: null,
+        updatedAt: nowIso,
+      })
+      return
+    }
+
+    const restoreResult = restoreIfcModelTransformFromProject(ifcRuntimeModel, projectDocument)
+    if (!restoreResult.appliedTransform) {
+      const mismatchHint = restoreResult.matchedSource
+        ? 'project JSON 內沒有可套用到目前 IFC 的 transform 記錄。'
+        : 'project JSON 找不到可對應目前 IFC 的 source（sourceId/fileName）。'
+
+      setProjectOpenState({
+        status: 'error',
+        message: `還原失敗：${mismatchHint}`,
+        openedFileName: file.name,
+        matchedTransformCount: restoreResult.matchedTransformCount,
+        skippedTransformCount: restoreResult.skippedTransformCount,
+        appliedObjectKey: null,
+        updatedAt: nowIso,
+      })
+      return
+    }
+
+    setProjectTransformRecords(projectDocument.objectTransforms.map((record) => cloneProjectTransformRecord(record)))
+    syncTransformSnapshotFromRestore(restoreResult.appliedTransform, nowIso)
+    const restoreByFileNameNotice =
+      restoreResult.sourceMatchStrategy === 'fileName'
+        ? 'sourceId 不一致，已以 fileName 對應成功。'
+        : ''
+    setProjectOpenState({
+      status: 'restored',
+      message:
+        restoreResult.skippedTransformCount > 0
+          ? `project JSON 已還原（匹配 ${restoreResult.matchedTransformCount} 筆，依 Step 10 model-root fallback 套用最新 1 筆）。${restoreByFileNameNotice}`
+          : `project JSON 已還原（套用 ${restoreResult.appliedTransform.objectRef.objectKey}）。${restoreByFileNameNotice}`,
+      openedFileName: file.name,
+      matchedTransformCount: restoreResult.matchedTransformCount,
+      skippedTransformCount: restoreResult.skippedTransformCount,
+      appliedObjectKey: restoreResult.appliedTransform.objectRef.objectKey,
+      updatedAt: nowIso,
+    })
+  }
+
   const handleIfcProbe = (probeResult: IfcRaycastProbeResult) => {
     const nextIdentity = mapIfcProbeToSceneObjectIdentity(ifcRuntimeModel, probeResult)
 
@@ -278,6 +439,7 @@ function App() {
       resetTransformState({
         clearTransformRecords: true,
         clearProjectSaveState: true,
+        clearProjectOpenState: true,
       })
       setIfcUploadState({
         file,
@@ -297,6 +459,7 @@ function App() {
     resetTransformState({
       clearTransformRecords: true,
       clearProjectSaveState: true,
+      clearProjectOpenState: true,
     })
     setIfcUploadState({
       file,
@@ -356,6 +519,7 @@ function App() {
       resetTransformState({
         clearTransformRecords: true,
         clearProjectSaveState: true,
+        clearProjectOpenState: true,
       })
       setIfcUploadState({
         file,
@@ -371,6 +535,7 @@ function App() {
       resetTransformState({
         clearTransformRecords: true,
         clearProjectSaveState: true,
+        clearProjectOpenState: true,
       })
       setIfcUploadState({
         file,
@@ -389,6 +554,7 @@ function App() {
         </div>
         <div className="toolbar-actions">
           <IfcUploadControl uploadState={ifcUploadState} onSelectIfcFile={handleSelectIfcFile} />
+          <ProjectJsonOpenControl onSelectProjectJsonFile={handleSelectProjectJsonFile} />
           <TransformModeToolbar
             mode={sceneObjectTransform.mode}
             disabled={!hasTransformTarget}
@@ -397,7 +563,7 @@ function App() {
           <button type="button" disabled={!ifcRuntimeModel} onClick={handleSaveProjectJson}>
             Save Project JSON
           </button>
-          <span className="status-pill">Step 13</span>
+          <span className="status-pill">Step 14</span>
         </div>
       </header>
 
@@ -433,6 +599,7 @@ function App() {
             <li>Transform dragging: {sceneObjectTransform.isDragging ? 'yes' : 'no'}</li>
             <li>Transform records: {projectTransformRecords.length}</li>
             <li>Orbit controls: {orbitControlsEnabled ? 'enabled' : 'disabled while transforming'}</li>
+            <li>Project open status: {projectOpenState.status}</li>
           </ul>
           <p className={`ifc-state-message is-${ifcUploadState.status}`}>{ifcUploadState.message}</p>
           {ifcUploadState.status === 'loading' && (
@@ -552,7 +719,19 @@ function App() {
               <li>updated at: {projectSaveState.updatedAt ?? '--'}</li>
             </ul>
           </section>
-          <p>Step 13 已接上 project JSON 下載流程；Step 14 會接續 open/restore。</p>
+          <section className={`ifc-probe-card is-${projectOpenState.status}`} aria-label="Project open state">
+            <h3>Project Open State (Step 14)</h3>
+            <p>{projectOpenState.message}</p>
+            <ul>
+              <li>status: {projectOpenState.status}</li>
+              <li>opened file: {projectOpenState.openedFileName ?? 'none'}</li>
+              <li>matched transforms: {projectOpenState.matchedTransformCount}</li>
+              <li>skipped transforms: {projectOpenState.skippedTransformCount}</li>
+              <li>applied object key: {projectOpenState.appliedObjectKey ?? 'none'}</li>
+              <li>updated at: {projectOpenState.updatedAt ?? '--'}</li>
+            </ul>
+          </section>
+          <p>Step 14 已接上 open/restore；使用流程是先 Upload IFC，再 Open Project JSON 還原 transform。</p>
         </aside>
       </section>
     </main>

@@ -1,3 +1,4 @@
+import type { Object3D } from 'three'
 import type { IfcRuntimeModel } from '../types/ifc'
 import type {
   ProjectIfcSource,
@@ -18,7 +19,7 @@ const toIfcProjectSource = (ifcModel: IfcRuntimeModel): ProjectIfcSource => ({
   modelId: ifcModel.modelId,
 })
 
-const cloneTransformRecord = (
+export const cloneProjectTransformRecord = (
   input: SceneObjectTransformSnapshot | ProjectObjectTransformRecord,
 ): ProjectObjectTransformRecord => ({
   objectRef: {
@@ -35,7 +36,7 @@ export const upsertProjectTransformRecord = (
   previousRecords: ProjectObjectTransformRecord[],
   nextRecord: SceneObjectTransformSnapshot | ProjectObjectTransformRecord,
 ): ProjectObjectTransformRecord[] => {
-  const nextRecordCopy = cloneTransformRecord(nextRecord)
+  const nextRecordCopy = cloneProjectTransformRecord(nextRecord)
   const nextObjectRefKey = buildObjectRefKey(nextRecordCopy.objectRef)
   const targetIndex = previousRecords.findIndex((record) => buildObjectRefKey(record.objectRef) === nextObjectRefKey)
 
@@ -80,10 +81,80 @@ export const serializeProjectDocument = ({
   const projectDocument = createEmptyProjectDocument(nowIso)
 
   projectDocument.sources = buildProjectSources(ifcModel)
-  projectDocument.objectTransforms = transformRecords.map((record) => cloneTransformRecord(record))
+  projectDocument.objectTransforms = transformRecords.map((record) => cloneProjectTransformRecord(record))
   projectDocument.updatedAt = nowIso
 
   return projectDocument
+}
+
+export interface IfcProjectRestoreResult {
+  matchedSource: boolean
+  sourceMatchStrategy: 'sourceId' | 'fileName' | 'none'
+  matchedSourceId: string | null
+  matchedTransformCount: number
+  skippedTransformCount: number
+  appliedTransform: ProjectObjectTransformRecord | null
+}
+
+const isIfcTransformRecordForModel = (record: ProjectObjectTransformRecord, modelId: string) =>
+  record.objectRef.sourceType === 'ifc' && record.objectRef.sourceId === modelId
+
+const normalizeFileName = (fileName: string) => fileName.trim().toLowerCase()
+
+const applyTransformRecordToObject = (targetObject: Object3D, transformRecord: ProjectObjectTransformRecord) => {
+  targetObject.position.set(...transformRecord.position)
+  targetObject.rotation.set(...transformRecord.rotation)
+  targetObject.scale.set(...transformRecord.scale)
+  targetObject.updateMatrixWorld(true)
+}
+
+export const restoreIfcModelTransformFromProject = (
+  ifcModel: IfcRuntimeModel,
+  projectDocument: ProjectJsonDocument,
+): IfcProjectRestoreResult => {
+  const ifcSources = projectDocument.sources.filter((source): source is ProjectIfcSource => source.sourceType === 'ifc')
+  const sourceMatchedById = ifcSources.find((source) => source.sourceId === ifcModel.modelId)
+  const sourceMatchedByFileName =
+    sourceMatchedById ??
+    ifcSources.find((source) => normalizeFileName(source.fileName) === normalizeFileName(ifcModel.fileName))
+
+  const sourceMatchStrategy = sourceMatchedById
+    ? 'sourceId'
+    : sourceMatchedByFileName
+      ? 'fileName'
+      : 'none'
+  const matchedSourceId = sourceMatchedByFileName?.sourceId ?? null
+  const matchedSource = sourceMatchStrategy !== 'none'
+
+  const matchedTransforms =
+    matchedSourceId === null
+      ? []
+      : projectDocument.objectTransforms.filter((record) => isIfcTransformRecordForModel(record, matchedSourceId))
+
+  if (matchedTransforms.length === 0) {
+    return {
+      matchedSource,
+      sourceMatchStrategy,
+      matchedSourceId,
+      matchedTransformCount: 0,
+      skippedTransformCount: 0,
+      appliedTransform: null,
+    }
+  }
+
+  const latestTransform = matchedTransforms[matchedTransforms.length - 1]
+
+  // Step 14：目前 IFC transform target 仍是 model root fallback，restore 時採同一 target 套用。
+  applyTransformRecordToObject(ifcModel.object, latestTransform)
+
+  return {
+    matchedSource,
+    sourceMatchStrategy,
+    matchedSourceId,
+    matchedTransformCount: matchedTransforms.length,
+    skippedTransformCount: Math.max(0, matchedTransforms.length - 1),
+    appliedTransform: cloneProjectTransformRecord(latestTransform),
+  }
 }
 
 export const createProjectDownloadFileName = (baseName: string, now = new Date()) => {

@@ -113,6 +113,12 @@
   cursor: pointer;
 }
 
+.toolbar-upload-button-secondary {
+  border-color: #8fa8ba;
+  background: #f2f7fb;
+  color: #2f4a5c;
+}
+
 .toolbar-upload-button input {
   position: absolute;
   width: 1px;
@@ -325,6 +331,11 @@
 }
 
 .ifc-probe-card.is-saved {
+  border-color: #97d2ad;
+  background: #f3fff7;
+}
+
+.ifc-probe-card.is-restored {
   border-color: #97d2ad;
   background: #f3fff7;
 }
