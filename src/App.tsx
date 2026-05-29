@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import IfcUploadControl from './components/IfcUploadControl'
 import ProjectJsonOpenControl from './components/ProjectJsonOpenControl'
 import TransformModeToolbar from './components/TransformModeToolbar'
@@ -108,6 +108,15 @@ const ifcProcessStateLabelMap: Record<Exclude<IfcLoadProcessState, null>, string
   start: '開始',
   inProgress: '進行中',
   finish: '完成',
+}
+
+const isTextEditableTarget = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) {
+    return false
+  }
+
+  const tagName = target.tagName.toLowerCase()
+  return tagName === 'input' || tagName === 'textarea' || tagName === 'select' || target.isContentEditable
 }
 
 function App() {
@@ -240,7 +249,7 @@ function App() {
 
   const hasTransformTarget = sceneObjectSelection.selectedObject?.sourceType === 'ifc'
 
-  const handleSaveProjectJson = () => {
+  const handleSaveProjectJson = useCallback(() => {
     if (!ifcRuntimeModel) {
       setProjectSaveState({
         status: 'error',
@@ -279,7 +288,31 @@ function App() {
       downloadedFileName: downloadFileName,
       updatedAt: nowIso,
     })
-  }
+  }, [ifcRuntimeModel, ifcUploadState.file, projectTransformRecords])
+
+  useEffect(() => {
+    const handleProjectQuickSave = (event: KeyboardEvent) => {
+      const hasSaveShortcutModifier = event.metaKey || event.ctrlKey
+      const isSaveKey = event.key.toLowerCase() === 's'
+      if (!hasSaveShortcutModifier || !isSaveKey) {
+        return
+      }
+
+      // Step 15：阻止瀏覽器原生另存視窗，改走 app 既有 project JSON save 流程。
+      event.preventDefault()
+
+      if (event.repeat || event.altKey || event.shiftKey || isTextEditableTarget(event.target)) {
+        return
+      }
+
+      handleSaveProjectJson()
+    }
+
+    window.addEventListener('keydown', handleProjectQuickSave)
+    return () => {
+      window.removeEventListener('keydown', handleProjectQuickSave)
+    }
+  }, [handleSaveProjectJson])
 
   const syncTransformSnapshotFromRestore = (appliedTransform: ProjectObjectTransformRecord, nowIso: string) => {
     setSceneObjectTransform((previousTransformState) => {
@@ -563,7 +596,7 @@ function App() {
           <button type="button" disabled={!ifcRuntimeModel} onClick={handleSaveProjectJson}>
             Save Project JSON
           </button>
-          <span className="status-pill">Step 14</span>
+          <span className="status-pill">Step 15</span>
         </div>
       </header>
 
@@ -731,7 +764,7 @@ function App() {
               <li>updated at: {projectOpenState.updatedAt ?? '--'}</li>
             </ul>
           </section>
-          <p>Step 14 已接上 open/restore；使用流程是先 Upload IFC，再 Open Project JSON 還原 transform。</p>
+          <p>Step 15 已接上 Cmd/Ctrl+S 快速儲存；Save Project JSON 與快捷鍵共用同一流程。</p>
         </aside>
       </section>
     </main>

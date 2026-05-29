@@ -254,13 +254,22 @@
 ### Step 15 - Ctrl+S quick save
 
 操作步驟：
+1. 先 `Upload IFC` 載入 `Building-Architecture.ifc`（避免因無模型而無法儲存）。
+1. 可選：先做一次 transform，方便後續檢查 JSON 內容。
 1. 在頁面按 `Ctrl+S`（Windows）或 `Cmd+S`（macOS）。
-1. 觀察是否觸發專案儲存。
-1. 確認瀏覽器預設另存視窗未跳出。
+1. 觀察是否直接下載 `*-project-*.json`。
+1. 確認沒有跳出瀏覽器/系統原生「網頁另存」對話框。
+1. 再按一次 toolbar 的 `Save Project JSON`，確認兩者都會更新同一個 `Project Save State`。
 
 預期結果：
-1. 觸發的是 app 的 save 流程。
-1. 不會出現瀏覽器原生儲存對話框。
+1. `Ctrl+S` / `Cmd+S` 觸發的是 app 的 project JSON save 流程。
+1. 不會出現瀏覽器原生儲存對話框（例如「格式：網頁，完整」的另存頁面視窗）。
+1. 快捷鍵與按鈕走同一條儲存流程（sidebar save 狀態一致）。
+
+建議人工驗收結論模板（可直接貼回覆）：
+1. Step 15 Ctrl/Cmd+S 觸發下載檢查：pass/fail
+1. Step 15 阻止原生另存視窗檢查：pass/fail
+1. Step 15 快捷鍵與按鈕流程一致檢查：pass/fail
 
 ### Step 16 - GLB / GLTF upload
 
