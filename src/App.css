@@ -324,6 +324,11 @@
   background: #f3fff7;
 }
 
+.ifc-probe-card.is-saved {
+  border-color: #97d2ad;
+  background: #f3fff7;
+}
+
 .ifc-probe-card.is-error {
   border-color: #e2b9b6;
   background: #fff6f5;

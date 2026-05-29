@@ -27,6 +27,9 @@ project JSON 不應該存整個 IFC geometry。只保存可還原狀態，例如
 - GLB object transform。
 - version number。
 
+Step 12 起 `project JSON` 採 `schema=bim-lightweight-viewer/project` + `version=1`。
+restore 流程若版本不符，應先拒絕套用並提示版本不相容。
+
 ## Camera fit
 
 Camera fit 可能因為模型 bounding box 尺寸不同而失敗。應寫成獨立 utility，方便之後調整。

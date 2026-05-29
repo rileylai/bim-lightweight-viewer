@@ -33,6 +33,9 @@ IFC selection 可能需要 expressID 或 loader 專用 API，不一定能和 GLB
 
 儲存 project JSON 時只保存可還原狀態，不保存完整 geometry。
 
+Step 12 先固定 `v1` 契約（`schema + version + sources + objectTransforms`），
+save / restore 一律先過 version gate，再進行後續流程。
+
 開啟 project JSON 時：
 
 1. 讀取 JSON。

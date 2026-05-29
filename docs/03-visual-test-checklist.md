@@ -179,24 +179,53 @@
 ### Step 12 - Project JSON schema design
 
 操作步驟：
-1. 打開 schema 或 type 定義檔。
-1. 用 sidebar/debug 或範例 JSON 檢查欄位是否包含版本、source info、identity、transform。
-1. 檢查是否沒有幾何本體欄位。
+1. 打開 `docs/09-project-json-schema.md`。
+1. 在「Schema 版本」段落確認：
+1. `schema` 是 `bim-lightweight-viewer/project`。
+1. `version` 是 `1`。
+1. 在同一份文件的 JSON 範例確認 top-level 一定有：
+1. `schema`、`version`、`createdAt`、`updatedAt`、`sources`、`objectTransforms`。
+1. 在 JSON 範例的 `objectTransforms[]` 確認每筆都有：
+1. `objectRef.sourceType`、`objectRef.sourceId`、`objectRef.objectKey`、`position`、`rotation`、`scale`。
+1. 在 `src/types/project.ts` 對照欄位命名是否與文件一致。
+1. 最後確認 JSON 範例中沒有幾何本體欄位（例如 `geometry`、`vertices`、`indices`、`buffer`、`mesh`）。
 
 預期結果：
-1. schema 能描述 IFC/GLB transform 還原所需最小欄位。
+1. schema 能描述 IFC/GLB transform 還原所需最小欄位（source + identity + transform）。
+1. 欄位語意與 `src/types/project.ts` 一致。
 1. 不包含完整 geometry。
+
+建議人工驗收結論模板（可直接貼回覆）：
+1. Step 12 schema version 檢查：pass/fail
+1. Step 12 必要欄位完整性檢查：pass/fail
+1. Step 12 無 geometry 本體檢查：pass/fail
 
 ### Step 13 - Save project JSON
 
 操作步驟：
-1. 載入模型並做至少一次 transform（若該 step 前置已可用）。
-1. 觸發 Save。
-1. 打開下載 JSON 檔案檢查內容。
+1. 載入 `Building-Architecture.ifc`，確認狀態為 loaded。
+1. 在 viewer 選取物件後，做至少一次 transform（Move/Rotate/Scale 任一皆可）。
+1. 點擊 toolbar 的 `Save Project JSON` 按鈕。
+1. 到系統下載資料夾打開最新的 `*-project-*.json`。
+1. 檢查 top-level 欄位一定有：
+1. `schema`、`version`、`createdAt`、`updatedAt`、`sources`、`objectTransforms`。
+1. 檢查 `schema` 必須是 `bim-lightweight-viewer/project`，`version` 必須是 `1`。
+1. 檢查 `sources` 至少有 1 筆 IFC source，且包含：
+1. `sourceType=ifc`、`sourceId`、`fileName`、`modelId`。
+1. 檢查 `objectTransforms` 至少有 1 筆，且每筆包含：
+1. `objectRef.sourceType`、`objectRef.sourceId`、`objectRef.objectKey`、`position`、`rotation`、`scale`。
+1. 檢查 JSON 內沒有幾何本體欄位（例如 `geometry`、`vertices`、`indices`、`buffer`、`mesh`）。
 
 預期結果：
 1. JSON 下載成功。
 1. JSON 內有 version、model/source reference、object identity、transform。
+1. JSON 不包含完整 geometry。
+
+建議人工驗收結論模板（可直接貼回覆）：
+1. Step 13 下載成功檢查：pass/fail
+1. Step 13 schema/version 檢查：pass/fail
+1. Step 13 sources/objectTransforms 欄位檢查：pass/fail
+1. Step 13 無 geometry 本體檢查：pass/fail
 
 ### Step 14 - Open project JSON and restore IFC transforms
 

@@ -49,6 +49,17 @@ save / restore 必須依賴 plain JSON-compatible project state，而不是 Reac
 - restore：先驗證 JSON schema，再依 object identity 把 transform 套回目前 scene。
 - 若 object identity 對不上（例如檔案不同、物件遺失），要回報可理解錯誤並保留可回滾狀態。
 
+## Step 12 - Project JSON Schema v1
+
+Step 12 已定義 `project JSON` 第一版契約（詳見 `docs/09-project-json-schema.md`）：
+
+- `schema = bim-lightweight-viewer/project`
+- `version = 1`
+- `sources[]`：IFC / GLB source metadata（不含幾何）
+- `objectTransforms[]`：`objectRef + position/rotation/scale`
+
+此版本只承諾最小可還原欄位。若未來做破壞性調整（例如改變 source/objectRef 結構），必須升版，不得覆寫 `v1` 語意。
+
 ## State 管理方向
 
 MVP 先使用 React state 與小型 context 管理。若狀態快速變複雜，再評估 Zustand 或其他輕量 store。

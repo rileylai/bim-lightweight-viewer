@@ -3,6 +3,13 @@ import IfcUploadControl from './components/IfcUploadControl'
 import TransformModeToolbar from './components/TransformModeToolbar'
 import ViewerCanvas from './components/ViewerCanvas'
 import { clearIfcRuntimeSelectionHighlight, loadIfcRuntimeModel, setIfcRuntimeSelectionHighlight } from './lib/ifcLoaderRuntime'
+import {
+  createProjectDownloadFileName,
+  downloadProjectJsonDocument,
+  serializeProjectDocument,
+  upsertProjectTransformRecord,
+} from './lib/projectPersistence'
+import { getProjectJsonValidationErrors } from './lib/projectSchema'
 import { createNextSelectionState, mapIfcProbeToSceneObjectIdentity } from './lib/sceneObjectIdentity'
 import type {
   IfcLoadProcess,
@@ -12,6 +19,7 @@ import type {
   IfcRuntimeModel,
   IfcUploadState,
 } from './types/ifc'
+import type { ProjectObjectTransformRecord } from './types/project'
 import type {
   SceneObjectSelectionState,
   SceneObjectTransformMode,
@@ -52,6 +60,20 @@ const initialSceneObjectTransformState: SceneObjectTransformState = {
   updatedAt: null,
 }
 
+interface ProjectSaveState {
+  status: 'idle' | 'saved' | 'error'
+  message: string
+  downloadedFileName: string | null
+  updatedAt: string | null
+}
+
+const initialProjectSaveState: ProjectSaveState = {
+  status: 'idle',
+  message: '尚未下載 project JSON。',
+  downloadedFileName: null,
+  updatedAt: null,
+}
+
 const ifcProcessLabelMap: Record<Exclude<IfcLoadProcess, null>, string> = {
   conversion: '整體轉換',
   geometries: '幾何解析',
@@ -75,6 +97,8 @@ function App() {
   const [sceneObjectTransform, setSceneObjectTransform] = useState<SceneObjectTransformState>(
     initialSceneObjectTransformState,
   )
+  const [projectTransformRecords, setProjectTransformRecords] = useState<ProjectObjectTransformRecord[]>([])
+  const [projectSaveState, setProjectSaveState] = useState<ProjectSaveState>(initialProjectSaveState)
   const latestLoadRequestIdRef = useRef(0)
 
   const toErrorMessage = (error: unknown) => {
@@ -152,6 +176,10 @@ function App() {
   }
 
   const updateTransformSnapshot = (snapshot: SceneObjectTransformSnapshot | null) => {
+    if (snapshot) {
+      setProjectTransformRecords((previousRecords) => upsertProjectTransformRecord(previousRecords, snapshot))
+    }
+
     setSceneObjectTransform((previousTransformState) => {
       if (previousTransformState.snapshot === snapshot) {
         return previousTransformState
@@ -165,12 +193,61 @@ function App() {
     })
   }
 
-  const resetTransformState = () => {
+  const resetTransformState = (options?: { clearTransformRecords?: boolean; clearProjectSaveState?: boolean }) => {
     setOrbitControlsEnabled(true)
     setSceneObjectTransform(initialSceneObjectTransformState)
+
+    if (options?.clearTransformRecords) {
+      setProjectTransformRecords([])
+    }
+
+    if (options?.clearProjectSaveState) {
+      setProjectSaveState(initialProjectSaveState)
+    }
   }
 
   const hasTransformTarget = sceneObjectSelection.selectedObject?.sourceType === 'ifc'
+
+  const handleSaveProjectJson = () => {
+    if (!ifcRuntimeModel) {
+      setProjectSaveState({
+        status: 'error',
+        message: '尚未載入 IFC 模型，無法儲存 project JSON。',
+        downloadedFileName: null,
+        updatedAt: new Date().toISOString(),
+      })
+      return
+    }
+
+    const nowIso = new Date().toISOString()
+    const projectDocument = serializeProjectDocument({
+      ifcModel: ifcRuntimeModel,
+      transformRecords: projectTransformRecords,
+      nowIso,
+    })
+    const validationErrors = getProjectJsonValidationErrors(projectDocument)
+
+    if (validationErrors.length > 0) {
+      setProjectSaveState({
+        status: 'error',
+        message: `project JSON 驗證失敗：${validationErrors.join('；')}`,
+        downloadedFileName: null,
+        updatedAt: nowIso,
+      })
+      return
+    }
+
+    const fileNameBase = ifcUploadState.file?.name ?? ifcRuntimeModel.fileName ?? ifcRuntimeModel.modelId
+    const downloadFileName = createProjectDownloadFileName(fileNameBase)
+    downloadProjectJsonDocument(projectDocument, downloadFileName)
+
+    setProjectSaveState({
+      status: 'saved',
+      message: `project JSON 已下載（sources: ${projectDocument.sources.length}，transforms: ${projectDocument.objectTransforms.length}）。`,
+      downloadedFileName: downloadFileName,
+      updatedAt: nowIso,
+    })
+  }
 
   const handleIfcProbe = (probeResult: IfcRaycastProbeResult) => {
     const nextIdentity = mapIfcProbeToSceneObjectIdentity(ifcRuntimeModel, probeResult)
@@ -198,7 +275,10 @@ function App() {
       setIfcLoadProgress(initialIfcLoadProgressState)
       setIfcRaycastProbe(initialIfcRaycastProbeState)
       setSceneObjectSelection(initialSceneObjectSelectionState)
-      resetTransformState()
+      resetTransformState({
+        clearTransformRecords: true,
+        clearProjectSaveState: true,
+      })
       setIfcUploadState({
         file,
         status: 'invalid',
@@ -214,7 +294,10 @@ function App() {
     setIfcLoadProgress(initialIfcLoadProgressState)
     setIfcRaycastProbe(initialIfcRaycastProbeState)
     setSceneObjectSelection(initialSceneObjectSelectionState)
-    resetTransformState()
+    resetTransformState({
+      clearTransformRecords: true,
+      clearProjectSaveState: true,
+    })
     setIfcUploadState({
       file,
       status: 'loading',
@@ -270,7 +353,10 @@ function App() {
       }))
       setIfcRuntimeModel(loadedIfcModel)
       setSceneObjectSelection(initialSceneObjectSelectionState)
-      resetTransformState()
+      resetTransformState({
+        clearTransformRecords: true,
+        clearProjectSaveState: true,
+      })
       setIfcUploadState({
         file,
         status: 'loaded',
@@ -282,7 +368,10 @@ function App() {
       }
 
       void clearIfcRuntimeSelectionHighlight()
-      resetTransformState()
+      resetTransformState({
+        clearTransformRecords: true,
+        clearProjectSaveState: true,
+      })
       setIfcUploadState({
         file,
         status: 'error',
@@ -305,7 +394,10 @@ function App() {
             disabled={!hasTransformTarget}
             onModeChange={updateTransformMode}
           />
-          <span className="status-pill">Step 11</span>
+          <button type="button" disabled={!ifcRuntimeModel} onClick={handleSaveProjectJson}>
+            Save Project JSON
+          </button>
+          <span className="status-pill">Step 13</span>
         </div>
       </header>
 
@@ -339,6 +431,7 @@ function App() {
             <li>Selected identity: {sceneObjectSelection.selectedObject?.identityId ?? 'none'}</li>
             <li>Transform mode: {sceneObjectTransform.mode}</li>
             <li>Transform dragging: {sceneObjectTransform.isDragging ? 'yes' : 'no'}</li>
+            <li>Transform records: {projectTransformRecords.length}</li>
             <li>Orbit controls: {orbitControlsEnabled ? 'enabled' : 'disabled while transforming'}</li>
           </ul>
           <p className={`ifc-state-message is-${ifcUploadState.status}`}>{ifcUploadState.message}</p>
@@ -450,7 +543,16 @@ function App() {
               </li>
             </ul>
           </section>
-          <p>Step 11 已補上 toolbar mode 切換 UI，並與 TransformControls mode 狀態同步。</p>
+          <section className={`ifc-probe-card is-${projectSaveState.status}`} aria-label="Project save state">
+            <h3>Project Save State (Step 13)</h3>
+            <p>{projectSaveState.message}</p>
+            <ul>
+              <li>status: {projectSaveState.status}</li>
+              <li>downloaded file: {projectSaveState.downloadedFileName ?? 'none'}</li>
+              <li>updated at: {projectSaveState.updatedAt ?? '--'}</li>
+            </ul>
+          </section>
+          <p>Step 13 已接上 project JSON 下載流程；Step 14 會接續 open/restore。</p>
         </aside>
       </section>
     </main>
