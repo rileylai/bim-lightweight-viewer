@@ -2,14 +2,20 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { OrbitControls, TransformControls } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import type { RefObject } from 'react'
-import type { Object3D, OrthographicCamera, PerspectiveCamera } from 'three'
+import { Box3, Raycaster, Vector2, Vector3 } from 'three'
+import type { Group, Mesh, Object3D, OrthographicCamera, PerspectiveCamera } from 'three'
 import type { OrbitControls as OrbitControlsImpl, TransformControls as TransformControlsImpl } from 'three-stdlib'
 import { fitCameraToObject } from '../lib/fitCameraToObject'
 import { bindIfcRuntimeCamera, probeIfcRuntimeSelection, updateIfcRuntimeView } from '../lib/ifcLoaderRuntime'
 import type { GlbRuntimeModel } from '../types/glb'
 import type { IfcRaycastProbeResult, IfcRuntimeModel } from '../types/ifc'
-import { toSceneObjectReference } from '../lib/sceneObjectIdentity'
+import {
+  createGlbSceneObjectIdentity,
+  mapIfcProbeToSceneObjectIdentity,
+  toSceneObjectReference,
+} from '../lib/sceneObjectIdentity'
 import type {
+  GlbSceneObjectIdentity,
   SceneObjectIdentity,
   SceneObjectTransformMode,
   SceneObjectTransformSnapshot,
@@ -21,7 +27,10 @@ interface ViewerCanvasProps {
   glbModels: GlbRuntimeModel[]
   selectedObject: SceneObjectIdentity | null
   transformMode: SceneObjectTransformMode
-  onIfcProbe: (result: IfcRaycastProbeResult) => void
+  onSceneSelectionChange: (selection: {
+    selectedObject: SceneObjectIdentity | null
+    ifcProbeResult: IfcRaycastProbeResult | null
+  }) => void
   onTransformModeChange: (mode: SceneObjectTransformMode) => void
   onTransformDraggingChange: (isDragging: boolean) => void
   onTransformSnapshotChange: (snapshot: SceneObjectTransformSnapshot | null) => void
@@ -36,20 +45,134 @@ interface CameraFitBridgeProps {
   orbitControlsRef: RefObject<OrbitControlsImpl | null>
 }
 
-interface IfcProbeBridgeProps {
+interface SceneProbeBridgeProps {
   ifcModel: IfcRuntimeModel | null
-  onIfcProbe: (result: IfcRaycastProbeResult) => void
+  glbModels: GlbRuntimeModel[]
+  onSceneSelectionChange: (selection: {
+    selectedObject: SceneObjectIdentity | null
+    ifcProbeResult: IfcRaycastProbeResult | null
+  }) => void
   transformControlsRef: RefObject<TransformControlsImpl | null>
 }
 
 interface TransformControlsBridgeProps {
   ifcModel: IfcRuntimeModel | null
+  glbModels: GlbRuntimeModel[]
   selectedObject: SceneObjectIdentity | null
   transformMode: SceneObjectTransformMode
   transformControlsRef: RefObject<TransformControlsImpl | null>
   onTransformModeChange: (mode: SceneObjectTransformMode) => void
   onTransformDraggingChange: (isDragging: boolean) => void
   onTransformSnapshotChange: (snapshot: SceneObjectTransformSnapshot | null) => void
+}
+
+interface GlbSelectionProbeResult {
+  identity: GlbSceneObjectIdentity
+  distance: number
+}
+
+const DEBUG_GLB_HIGHLIGHT = false
+
+const debugGlbHighlightLog = (label: string, payload: unknown) => {
+  if (!DEBUG_GLB_HIGHLIGHT) {
+    return
+  }
+
+  console.log(label, payload)
+}
+
+const findGlbRuntimeModelBySourceId = (glbModels: GlbRuntimeModel[], sourceId: string) =>
+  glbModels.find((model) => model.sourceId === sourceId) ?? null
+
+const resolveTransformTarget = (
+  ifcModel: IfcRuntimeModel | null,
+  glbModels: GlbRuntimeModel[],
+  selectedObject: SceneObjectIdentity | null,
+) => {
+  if (!selectedObject) {
+    return null
+  }
+
+  if (selectedObject.sourceType === 'ifc') {
+    if (!ifcModel || selectedObject.sourceId !== ifcModel.modelId) {
+      return null
+    }
+
+    return ifcModel.object
+  }
+
+  return findGlbRuntimeModelBySourceId(glbModels, selectedObject.sourceId)?.object ?? null
+}
+
+const buildGlbNodePath = (rootObject: Object3D, targetObject: Object3D) => {
+  const nodeSegments: string[] = []
+  let currentObject: Object3D | null = targetObject
+
+  while (currentObject) {
+    nodeSegments.push(currentObject.name || currentObject.type)
+    if (currentObject === rootObject) {
+      nodeSegments.reverse()
+      return nodeSegments.join('/')
+    }
+    currentObject = currentObject.parent
+  }
+
+  return null
+}
+
+const findGlbModelFromHitObject = (glbModels: GlbRuntimeModel[], hitObject: Object3D) => {
+  let currentObject: Object3D | null = hitObject
+
+  while (currentObject) {
+    const matchedModel = glbModels.find((glbModel) => glbModel.object === currentObject)
+    if (matchedModel) {
+      return matchedModel
+    }
+    currentObject = currentObject.parent
+  }
+
+  return null
+}
+
+const probeGlbSelection = (
+  glbModels: GlbRuntimeModel[],
+  camera: PerspectiveCamera | OrthographicCamera,
+  ndcX: number,
+  ndcY: number,
+) => {
+  if (glbModels.length === 0 || !Number.isFinite(ndcX) || !Number.isFinite(ndcY)) {
+    return null
+  }
+
+  const raycaster = new Raycaster()
+  const pointer = new Vector2(ndcX, ndcY)
+  raycaster.setFromCamera(pointer, camera)
+
+  const intersections = raycaster.intersectObjects(
+    glbModels.map((glbModel) => glbModel.object),
+    true,
+  )
+
+  // Step 17：GLB 可沿用 Three.js raycast；命中子節點後回推到所屬 root model 並建立 shared identity。
+  for (const intersection of intersections) {
+    const matchedModel = findGlbModelFromHitObject(glbModels, intersection.object)
+    if (!matchedModel) {
+      continue
+    }
+
+    const nodePath = buildGlbNodePath(matchedModel.object, intersection.object)
+    return {
+      identity: createGlbSceneObjectIdentity({
+        sourceId: matchedModel.sourceId,
+        fileName: matchedModel.fileName,
+        rootObjectId: matchedModel.rootObjectId,
+        nodePath,
+      }),
+      distance: intersection.distance,
+    } satisfies GlbSelectionProbeResult
+  }
+
+  return null
 }
 
 function IfcRuntimeBridge({ ifcModel }: IfcRuntimeBridgeProps) {
@@ -172,6 +295,7 @@ const createTransformSnapshot = (
 
 function TransformControlsBridge({
   ifcModel,
+  glbModels,
   selectedObject,
   transformMode,
   transformControlsRef,
@@ -179,17 +303,10 @@ function TransformControlsBridge({
   onTransformDraggingChange,
   onTransformSnapshotChange,
 }: TransformControlsBridgeProps) {
-  const transformTarget = useMemo(() => {
-    if (!ifcModel || !selectedObject || selectedObject.sourceType !== 'ifc') {
-      return null
-    }
-
-    if (selectedObject.sourceId !== ifcModel.modelId) {
-      return null
-    }
-
-    return ifcModel.object
-  }, [ifcModel, selectedObject])
+  const transformTarget = useMemo(
+    () => resolveTransformTarget(ifcModel, glbModels, selectedObject),
+    [glbModels, ifcModel, selectedObject],
+  )
 
   const emitTransformSnapshot = useCallback(() => {
     if (!selectedObject || !transformTarget) {
@@ -273,14 +390,18 @@ function TransformControlsBridge({
   )
 }
 
-function IfcProbeBridge({ ifcModel, onIfcProbe, transformControlsRef }: IfcProbeBridgeProps) {
+function SceneProbeBridge({ ifcModel, glbModels, onSceneSelectionChange, transformControlsRef }: SceneProbeBridgeProps) {
   const { camera, gl } = useThree()
+  const probeSequenceRef = useRef(0)
 
   const runProbeFromPointer = useCallback(
     (event: PointerEvent) => {
-      if (!ifcModel || event.button !== 0) {
+      if (event.button !== 0 || (!ifcModel && glbModels.length === 0)) {
         return
       }
+
+      const probeSequence = probeSequenceRef.current + 1
+      probeSequenceRef.current = probeSequence
 
       const transformControls = transformControlsRef.current
       // Step 10：操作 gizmo（hover/drag）時略過 IFC probe，避免 transform 互動被誤判成場景點選。
@@ -313,7 +434,7 @@ function IfcProbeBridge({ ifcModel, onIfcProbe, transformControlsRef }: IfcProbe
 
       // Step 8 診斷：確認 click 座標、canvas rect、NDC 與 camera 參數是否一致，排查命中偏移來源。
       console.log('[IfcProbeDebug] pointerdown', {
-        modelId: ifcModel.modelId,
+        modelId: ifcModel?.modelId ?? null,
         browserClientX: event.clientX,
         browserClientY: event.clientY,
         canvasRelativeX: Number(canvasX.toFixed(3)),
@@ -366,6 +487,29 @@ function IfcProbeBridge({ ifcModel, onIfcProbe, transformControlsRef }: IfcProbe
         return
       }
 
+      const glbHit = probeGlbSelection(glbModels, camera as PerspectiveCamera | OrthographicCamera, ndcX, ndcY)
+      debugGlbHighlightLog('[SceneProbeDebug] glb probe candidate', {
+        probeSequence,
+        hasIfcModel: Boolean(ifcModel),
+        glbModelCount: glbModels.length,
+        hasGlbHit: Boolean(glbHit),
+        glbDistance: glbHit?.distance ?? null,
+        glbSourceId: glbHit?.identity.sourceId ?? null,
+      })
+      if (!ifcModel) {
+        debugGlbHighlightLog('[SceneProbeDebug] apply glb-only selection', {
+          probeSequence,
+          selectedSourceType: glbHit?.identity.sourceType ?? null,
+          selectedSourceId: glbHit?.identity.sourceId ?? null,
+          selectedIdentityId: glbHit?.identity.identityId ?? null,
+        })
+        onSceneSelectionChange({
+          selectedObject: glbHit?.identity ?? null,
+          ifcProbeResult: null,
+        })
+        return
+      }
+
       // Step 8 補強：點擊時再次綁定目前 camera，避免 runtime 使用過期相機狀態。
       bindIfcRuntimeCamera(camera as PerspectiveCamera | OrthographicCamera)
 
@@ -375,9 +519,41 @@ function IfcProbeBridge({ ifcModel, onIfcProbe, transformControlsRef }: IfcProbe
         dom: canvas,
         clientX: event.clientX,
         clientY: event.clientY,
-      }).then(onIfcProbe)
+      }).then((ifcProbeResult) => {
+        const ifcIdentity = mapIfcProbeToSceneObjectIdentity(ifcModel, ifcProbeResult)
+        const ifcDistance =
+          ifcProbeResult.status === 'hit' ? ifcProbeResult.hit?.distance ?? Number.POSITIVE_INFINITY : Number.POSITIVE_INFINITY
+        const glbDistance = glbHit?.distance ?? Number.POSITIVE_INFINITY
+
+        let selectedObject: SceneObjectIdentity | null = null
+        // Step 17：IFC 與 GLB 同時命中時，以距離最近的候選做選取，避免兩套 probe 互相覆蓋。
+        if (ifcIdentity && glbHit) {
+          selectedObject = ifcDistance <= glbDistance ? ifcIdentity : glbHit.identity
+        } else if (ifcIdentity) {
+          selectedObject = ifcIdentity
+        } else if (glbHit) {
+          selectedObject = glbHit.identity
+        }
+
+        debugGlbHighlightLog('[SceneProbeDebug] ifc/glb selection compare', {
+          probeSequence,
+          ifcProbeStatus: ifcProbeResult.status,
+          ifcDistance: Number.isFinite(ifcDistance) ? ifcDistance : null,
+          ifcSourceId: ifcIdentity?.sourceId ?? null,
+          glbDistance: Number.isFinite(glbDistance) ? glbDistance : null,
+          glbSourceId: glbHit?.identity.sourceId ?? null,
+          selectedSourceType: selectedObject?.sourceType ?? null,
+          selectedSourceId: selectedObject?.sourceId ?? null,
+          selectedIdentityId: selectedObject?.identityId ?? null,
+        })
+
+        onSceneSelectionChange({
+          selectedObject,
+          ifcProbeResult,
+        })
+      })
     },
-    [camera, gl, ifcModel, onIfcProbe, transformControlsRef],
+    [camera, gl, glbModels, ifcModel, onSceneSelectionChange, transformControlsRef],
   )
 
   useEffect(() => {
@@ -392,13 +568,145 @@ function IfcProbeBridge({ ifcModel, onIfcProbe, transformControlsRef }: IfcProbe
   return null
 }
 
+function GlbSelectionHighlightBridge({
+  glbModels,
+  selectedObject,
+}: {
+  glbModels: GlbRuntimeModel[]
+  selectedObject: SceneObjectIdentity | null
+}) {
+  const highlightGroupRef = useRef<Group | null>(null)
+  const highlightFillMeshRef = useRef<Mesh | null>(null)
+  const highlightEdgeMeshRef = useRef<Mesh | null>(null)
+  const boxRef = useRef(new Box3())
+  const centerRef = useRef(new Vector3())
+  const sizeRef = useRef(new Vector3())
+  const targetObject = useMemo(() => {
+    if (!selectedObject || selectedObject.sourceType !== 'glb') {
+      return null
+    }
+
+    return findGlbRuntimeModelBySourceId(glbModels, selectedObject.sourceId)?.object ?? null
+  }, [glbModels, selectedObject])
+  const lastDebugSnapshotRef = useRef<string | null>(null)
+  const roundToDebugNumber = (value: number) => Number(value.toFixed(4))
+
+  useEffect(() => {
+    debugGlbHighlightLog('[GlbHighlightDebug] target resolve', {
+      selectedIdentityId: selectedObject?.identityId ?? null,
+      selectedSourceId: selectedObject?.sourceId ?? null,
+      selectedSourceType: selectedObject?.sourceType ?? null,
+      resolvedTargetUuid: targetObject?.uuid ?? null,
+      resolvedTargetType: targetObject?.type ?? null,
+      glbModelCount: glbModels.length,
+    })
+    lastDebugSnapshotRef.current = null
+  }, [glbModels.length, selectedObject, targetObject])
+
+  useFrame(() => {
+    if (!targetObject || !highlightGroupRef.current || !highlightFillMeshRef.current || !highlightEdgeMeshRef.current) {
+      return
+    }
+
+    targetObject.updateWorldMatrix(true, true)
+    boxRef.current.setFromObject(targetObject, true)
+    const isBoundingBoxEmpty = boxRef.current.isEmpty()
+    if (isBoundingBoxEmpty) {
+      highlightGroupRef.current.visible = false
+      const emptySnapshot = JSON.stringify({
+        targetUuid: targetObject.uuid,
+        bboxEmpty: true,
+        highlightGroupVisible: highlightGroupRef.current.visible,
+      })
+      if (lastDebugSnapshotRef.current !== emptySnapshot) {
+        debugGlbHighlightLog('[GlbHighlightDebug] bbox empty', JSON.parse(emptySnapshot))
+        lastDebugSnapshotRef.current = emptySnapshot
+      }
+      return
+    }
+
+    boxRef.current.getCenter(centerRef.current)
+    boxRef.current.getSize(sizeRef.current)
+    highlightGroupRef.current.visible = true
+    highlightFillMeshRef.current.visible = true
+    highlightEdgeMeshRef.current.visible = true
+
+    highlightGroupRef.current.position.copy(centerRef.current)
+    // Step 17 修補：高亮採 dual-layer overlay（fill + edge）提高遠近距辨識度。
+    highlightGroupRef.current.scale.set(
+      Math.max(sizeRef.current.x, 0.001),
+      Math.max(sizeRef.current.y, 0.001),
+      Math.max(sizeRef.current.z, 0.001),
+    )
+
+    const highlightSnapshot = JSON.stringify({
+      targetUuid: targetObject.uuid,
+      bboxEmpty: false,
+      bboxSize: {
+        x: roundToDebugNumber(sizeRef.current.x),
+        y: roundToDebugNumber(sizeRef.current.y),
+        z: roundToDebugNumber(sizeRef.current.z),
+      },
+      highlightPosition: {
+        x: roundToDebugNumber(highlightGroupRef.current.position.x),
+        y: roundToDebugNumber(highlightGroupRef.current.position.y),
+        z: roundToDebugNumber(highlightGroupRef.current.position.z),
+      },
+      highlightScale: {
+        x: roundToDebugNumber(highlightGroupRef.current.scale.x),
+        y: roundToDebugNumber(highlightGroupRef.current.scale.y),
+        z: roundToDebugNumber(highlightGroupRef.current.scale.z),
+      },
+      highlightGroupVisible: highlightGroupRef.current.visible,
+      highlightFillVisible: highlightFillMeshRef.current.visible,
+      highlightEdgeVisible: highlightEdgeMeshRef.current.visible,
+    })
+    if (lastDebugSnapshotRef.current !== highlightSnapshot) {
+      debugGlbHighlightLog('[GlbHighlightDebug] bbox/highlight snapshot', JSON.parse(highlightSnapshot))
+      lastDebugSnapshotRef.current = highlightSnapshot
+    }
+  })
+
+  if (!targetObject) {
+    return null
+  }
+
+  return (
+    <group ref={highlightGroupRef} frustumCulled={false}>
+      <mesh ref={highlightFillMeshRef} frustumCulled={false} renderOrder={998}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshBasicMaterial
+          color="#ffb347"
+          transparent
+          opacity={0.16}
+          depthTest={false}
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
+      <mesh ref={highlightEdgeMeshRef} frustumCulled={false} renderOrder={999}>
+        <boxGeometry args={[1, 1, 1]} />
+        <meshBasicMaterial
+          color="#ff7a00"
+          wireframe
+          transparent
+          opacity={0.98}
+          depthTest={false}
+          depthWrite={false}
+          toneMapped={false}
+        />
+      </mesh>
+    </group>
+  )
+}
+
 function ViewerCanvas({
   orbitEnabled = true,
   ifcModel,
   glbModels,
   selectedObject,
   transformMode,
-  onIfcProbe,
+  onSceneSelectionChange,
   onTransformModeChange,
   onTransformDraggingChange,
   onTransformSnapshotChange,
@@ -438,6 +746,7 @@ function ViewerCanvas({
       <CameraFitBridge fitTargetModel={fitTargetModel} orbitControlsRef={orbitControlsRef} />
       <TransformControlsBridge
         ifcModel={ifcModel}
+        glbModels={glbModels}
         selectedObject={selectedObject}
         transformMode={transformMode}
         transformControlsRef={transformControlsRef}
@@ -445,7 +754,13 @@ function ViewerCanvas({
         onTransformDraggingChange={onTransformDraggingChange}
         onTransformSnapshotChange={onTransformSnapshotChange}
       />
-      <IfcProbeBridge ifcModel={ifcModel} onIfcProbe={onIfcProbe} transformControlsRef={transformControlsRef} />
+      <SceneProbeBridge
+        ifcModel={ifcModel}
+        glbModels={glbModels}
+        onSceneSelectionChange={onSceneSelectionChange}
+        transformControlsRef={transformControlsRef}
+      />
+      <GlbSelectionHighlightBridge glbModels={glbModels} selectedObject={selectedObject} />
 
       {ifcModel ? <primitive object={ifcModel.object} /> : null}
 

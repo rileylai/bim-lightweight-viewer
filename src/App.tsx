@@ -15,7 +15,7 @@ import {
   upsertProjectTransformRecord,
 } from './lib/projectPersistence'
 import { getProjectJsonValidationErrors } from './lib/projectSchema'
-import { createNextSelectionState, mapIfcProbeToSceneObjectIdentity } from './lib/sceneObjectIdentity'
+import { createNextSelectionState } from './lib/sceneObjectIdentity'
 import type { GlbRuntimeModel, GlbUploadState } from './types/glb'
 import type {
   IfcLoadProcess,
@@ -27,6 +27,7 @@ import type {
 } from './types/ifc'
 import type { ProjectJsonDocument, ProjectObjectTransformRecord } from './types/project'
 import type {
+  SceneObjectIdentity,
   SceneObjectSelectionState,
   SceneObjectTransformMode,
   SceneObjectTransformSnapshot,
@@ -117,6 +118,16 @@ const ifcProcessStateLabelMap: Record<Exclude<IfcLoadProcessState, null>, string
   start: '開始',
   inProgress: '進行中',
   finish: '完成',
+}
+
+const DEBUG_GLB_HIGHLIGHT = false
+
+const debugGlbHighlightLog = (label: string, payload: unknown) => {
+  if (!DEBUG_GLB_HIGHLIGHT) {
+    return
+  }
+
+  console.log(label, payload)
 }
 
 const isTextEditableTarget = (target: EventTarget | null) => {
@@ -220,7 +231,8 @@ function App() {
   }
 
   const updateTransformSnapshot = (snapshot: SceneObjectTransformSnapshot | null) => {
-    if (snapshot) {
+    if (snapshot && snapshot.objectRef.sourceType === 'ifc') {
+      // Step 17：GLB transform 先落地在 runtime 互動；project JSON 寫入仍維持 IFC-only，待 Step 19 再擴充。
       setProjectTransformRecords((previousRecords) => upsertProjectTransformRecord(previousRecords, snapshot))
     }
 
@@ -258,7 +270,7 @@ function App() {
     }
   }
 
-  const hasTransformTarget = sceneObjectSelection.selectedObject?.sourceType === 'ifc'
+  const hasTransformTarget = sceneObjectSelection.selectedObject !== null
 
   const handleSaveProjectJson = useCallback(() => {
     if (!ifcRuntimeModel) {
@@ -495,17 +507,40 @@ function App() {
     }
   }
 
-  const handleIfcProbe = (probeResult: IfcRaycastProbeResult) => {
-    const nextIdentity = mapIfcProbeToSceneObjectIdentity(ifcRuntimeModel, probeResult)
+  const handleSceneSelectionChange = ({
+    selectedObject,
+    ifcProbeResult,
+  }: {
+    selectedObject: SceneObjectIdentity | null
+    ifcProbeResult: IfcRaycastProbeResult | null
+  }) => {
+    const matchedGlbSource =
+      selectedObject?.sourceType === 'glb'
+        ? glbRuntimeModels.find((model) => model.sourceId === selectedObject.sourceId) ?? null
+        : null
 
-    setIfcRaycastProbe(probeResult)
-    setSceneObjectSelection((previousSelection) => createNextSelectionState(previousSelection, nextIdentity))
+    debugGlbHighlightLog('[SceneSelectionDebug] selection change', {
+      selectedSourceType: selectedObject?.sourceType ?? null,
+      selectedSourceId: selectedObject?.sourceId ?? null,
+      selectedIdentityId: selectedObject?.identityId ?? null,
+      matchedGlbSourceId: matchedGlbSource?.sourceId ?? null,
+      matchedGlbRootObjectId: matchedGlbSource?.rootObjectId ?? null,
+      ifcProbeStatus: ifcProbeResult?.status ?? null,
+    })
 
-    void syncSelectedHighlight(nextIdentity).catch((error: unknown) => {
+    if (ifcProbeResult) {
+      setIfcRaycastProbe(ifcProbeResult)
+    } else if (!ifcRuntimeModel) {
+      setIfcRaycastProbe(initialIfcRaycastProbeState)
+    }
+
+    setSceneObjectSelection((previousSelection) => createNextSelectionState(previousSelection, selectedObject))
+
+    void syncSelectedHighlight(selectedObject).catch((error: unknown) => {
       console.warn('[IfcSelection] highlight update failed', error)
     })
 
-    if (!nextIdentity) {
+    if (!selectedObject) {
       resetTransformState()
     }
   }
@@ -649,7 +684,7 @@ function App() {
           <button type="button" disabled={!ifcRuntimeModel} onClick={handleSaveProjectJson}>
             Save Project JSON
           </button>
-          <span className="status-pill">Step 16</span>
+          <span className="status-pill">Step 17</span>
         </div>
       </header>
 
@@ -666,7 +701,7 @@ function App() {
               glbModels={glbRuntimeModels}
               selectedObject={sceneObjectSelection.selectedObject}
               transformMode={sceneObjectTransform.mode}
-              onIfcProbe={handleIfcProbe}
+              onSceneSelectionChange={handleSceneSelectionChange}
               onTransformModeChange={updateTransformMode}
               onTransformDraggingChange={updateTransformDraggingState}
               onTransformSnapshotChange={updateTransformSnapshot}
@@ -763,7 +798,14 @@ function App() {
                         : 'localId-level highlight'}
                     </li>
                   </>
-                ) : null}
+                ) : (
+                  <>
+                    <li>transform target: GLB root object（Step 17 root-level）</li>
+                    <li>metadata.rootObjectId: {sceneObjectSelection.selectedObject.metadata.rootObjectId ?? 'n/a'}</li>
+                    <li>metadata.nodePath: {sceneObjectSelection.selectedObject.metadata.nodePath ?? 'n/a'}</li>
+                    <li>highlight policy: GLB dual-layer overlay highlight（fill + edge）</li>
+                  </>
+                )}
               </ul>
             ) : null}
           </section>
@@ -772,13 +814,13 @@ function App() {
             <p>
               {sceneObjectTransform.snapshot
                 ? '已附加 TransformControls，拖曳後會更新可序列化 transform snapshot。'
-                : '目前沒有可變形目標（需先選取 IFC 物件）。'}
+                : '目前沒有可變形目標（需先選取 IFC 或 GLB 物件）。'}
             </p>
             <p>Updated at: {sceneObjectTransform.updatedAt ?? '--'}</p>
             <ul>
               <li>mode: {sceneObjectTransform.mode}</li>
               <li>isDragging: {sceneObjectTransform.isDragging ? 'true' : 'false'}</li>
-              <li>toolbar enabled: {hasTransformTarget ? 'true' : 'false (請先選取 IFC 物件)'}</li>
+              <li>toolbar enabled: {hasTransformTarget ? 'true' : 'false (請先選取 IFC 或 GLB 物件)'}</li>
               <li>snapshot target: {sceneObjectTransform.snapshot?.objectRef.objectKey ?? 'none'}</li>
               <li>
                 position:{' '}
@@ -833,7 +875,7 @@ function App() {
               </li>
             </ul>
           </section>
-          <p>Step 16 已接上 GLB/GLTF upload；可與既有 IFC 一起顯示於 scene。</p>
+          <p>Step 17 已支援 GLB selection 與 transform，IFC/GLB 可在同一 scene 交替操作。</p>
         </aside>
       </section>
     </main>

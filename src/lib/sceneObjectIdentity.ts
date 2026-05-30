@@ -1,5 +1,7 @@
 import type { IfcRaycastProbeResult, IfcRuntimeModel } from '../types/ifc'
 import type {
+  GlbProbeIdentityInput,
+  GlbSceneObjectIdentity,
   IfcProbeIdentityInput,
   IfcSceneObjectIdentity,
   SceneObjectIdentity,
@@ -45,6 +47,13 @@ const buildIfcDisplayLabel = (input: IfcProbeIdentityInput, level: SceneObjectSe
   return `${shortFileName} / model-root`
 }
 
+const buildGlbObjectKey = (input: GlbProbeIdentityInput) => `root:${input.rootObjectId ?? 'scene-root'}`
+
+const buildGlbDisplayLabel = (input: GlbProbeIdentityInput) => {
+  const shortFileName = input.fileName.replace(/\.(glb|gltf)$/i, '')
+  return `${shortFileName} / ${input.nodePath ?? 'root'}`
+}
+
 export const createIfcSceneObjectIdentity = (input: IfcProbeIdentityInput): IfcSceneObjectIdentity => {
   const selectionLevel = resolveIfcSelectionLevel(input)
   const objectKey = buildIfcObjectKey(input)
@@ -69,6 +78,29 @@ export const createIfcSceneObjectIdentity = (input: IfcProbeIdentityInput): IfcS
       expressId: input.hit.expressIdCandidate ?? input.hit.itemDataExpressIdCandidate,
       representationClass: input.hit.representationClass,
       snappingClass: input.hit.snappingClass,
+    },
+  }
+}
+
+export const createGlbSceneObjectIdentity = (input: GlbProbeIdentityInput): GlbSceneObjectIdentity => {
+  const objectKey = buildGlbObjectKey(input)
+  const reference = {
+    sourceType: 'glb',
+    sourceId: input.sourceId,
+    objectKey,
+  } satisfies SceneObjectIdentityReference
+  const selectionLevel: SceneObjectSelectionLevel = input.nodePath ? 'node' : 'model'
+
+  // Step 17：GLB 命中節點先統一映射為 shared identity，TransformControls 仍以 root 為 attach target。
+  return {
+    ...reference,
+    identityId: buildSceneObjectIdentityId(reference),
+    selectionLevel,
+    displayLabel: buildGlbDisplayLabel(input),
+    metadata: {
+      fileName: input.fileName,
+      rootObjectId: input.rootObjectId,
+      nodePath: input.nodePath,
     },
   }
 }
@@ -99,7 +131,11 @@ export const createNextSelectionState = (
     }
   }
 
-  if (previousState.selectedObject?.identityId === selectedObject.identityId) {
+  if (
+    previousState.selectedObject?.identityId === selectedObject.identityId &&
+    previousState.selectedObject.selectionLevel === selectedObject.selectionLevel &&
+    previousState.selectedObject.displayLabel === selectedObject.displayLabel
+  ) {
     return previousState
   }
 

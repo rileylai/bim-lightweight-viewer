@@ -69,3 +69,10 @@ export interface IfcProbeIdentityInput {
   fileName: string
   hit: IfcRaycastProbeHit
 }
+
+export interface GlbProbeIdentityInput {
+  sourceId: string
+  fileName: string
+  rootObjectId: string | null
+  nodePath: string | null
+}

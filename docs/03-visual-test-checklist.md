@@ -296,13 +296,29 @@
 ### Step 17 - GLB object selection and transform
 
 操作步驟：
-1. 點擊 GLB 物件確認可選取。
-1. 切換到 IFC 物件再切回 GLB。
-1. 對 GLB 進行 transform。
+1. 先上傳一個 `.glb/.gltf`，確認模型已顯示在 scene（可先不載 IFC）。
+1. 點擊 GLB 模型不同部位（例如主體、子節點），觀察 sidebar 的 `Selected Object (Step 9)` 是否更新為 `sourceType: glb`。
+1. 確認 GLB 被選取後，模型外框出現高亮框（dual-layer overlay：fill + edge）。
+1. 切換 `Move / Rotate / Scale`（或使用 `W/E/R`），拖曳 gizmo，確認 GLB 可被 transform。
+1. 若同時有 IFC：先點 IFC 再點 GLB，反覆切換 2~3 次，確認兩者都能被選取，且高亮/transform target 會正確切換。
+1. 點擊空白區域，確認 selected state 清空且 TransformControls 消失。
 
 預期結果：
-1. GLB 與 IFC 都可被選取（依當前支援範圍）。
-1. GLB transform 行為正確。
+1. GLB 點擊後會進入 selected state（`sourceType=glb`），並顯示 GLB 高亮框。
+1. GLB 高亮在遠距與近距視角都可辨識，不應只在特定角度才勉強可見。
+1. GLB 在三種 mode 下都可正常 move/rotate/scale，拖曳期間 OrbitControls 不干擾，放開後恢復。
+1. IFC 與 GLB 可交替選取，不會互相卡住或覆蓋錯誤目標。
+1. 點空白可清除選取狀態，不殘留錯誤 gizmo。
+
+建議人工驗收結論模板（可直接貼回覆）：
+1. Step 17 GLB 選取與高亮檢查：pass/fail
+1. Step 17 GLB move/rotate/scale 檢查：pass/fail
+1. Step 17 IFC/GLB 交替選取檢查：pass/fail
+
+若 Step 17 fail（特別是「選得到但看不到高亮」），請一併回傳以下 debug 訊息：
+1. 打開 DevTools Console，重做一次 `GLB-only` 與 `IFC+GLB` 兩組流程（每組點擊 3 次）。
+1. 貼上 `SceneSelectionDebug`、`SceneProbeDebug`、`GlbHighlightDebug` 三組 log。
+1. 至少包含一筆「點到 GLB 且 sidebar 顯示 `sourceType: glb` 但畫面看不到高亮」的 log 片段。
 
 ### Step 18 - GLB delete support
 
