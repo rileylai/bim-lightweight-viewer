@@ -274,13 +274,24 @@
 ### Step 16 - GLB / GLTF upload
 
 操作步驟：
-1. 上傳 `.glb` 或 `.gltf` 測試檔。
-1. 觀察 scene 與 status。
-1. 操作 orbit 確認互動正常。
+1. 先不載入 IFC，直接點 toolbar 的 `GLB/GLTF Upload`。
+1. 上傳一個 `.glb` 測試檔（建議先用單檔、無外部貼圖依賴的模型）。
+1. 確認模型出現在 3D scene，且 sidebar 的 `GLB/GLTF Upload State (Step 16)` 變為 loaded。
+1. 再上傳第二個 `.glb` 或 `.gltf`，確認 scene 會累加顯示，`loaded models` 計數增加。
+1. 操作 OrbitControls（旋轉/平移/縮放），確認 GLB/GLTF 顯示期間互動正常。
+1. 錯誤案例：上傳非 `.glb/.gltf` 檔案，確認顯示格式錯誤提示。
 
 預期結果：
-1. GLB/GLTF 物件可顯示在 scene。
-1. 狀態切換與錯誤提示行為合理。
+1. `.glb/.gltf` 可載入並顯示在 scene。
+1. sidebar 會顯示 `status/file/loaded models/latest source`，狀態切換合理（loading -> loaded / invalid / error）。
+1. 非支援副檔名會被阻止並顯示可理解錯誤訊息。
+1. OrbitControls 在 GLB/GLTF 顯示時仍可正常操作。
+
+建議人工驗收結論模板（可直接貼回覆）：
+1. Step 16 GLB/GLTF 載入顯示檢查：pass/fail
+1. Step 16 多檔累加顯示檢查：pass/fail
+1. Step 16 狀態與錯誤提示檢查：pass/fail
+1. Step 16 OrbitControls 互動檢查：pass/fail
 
 ### Step 17 - GLB object selection and transform
 

@@ -6,6 +6,7 @@ import type { Object3D, OrthographicCamera, PerspectiveCamera } from 'three'
 import type { OrbitControls as OrbitControlsImpl, TransformControls as TransformControlsImpl } from 'three-stdlib'
 import { fitCameraToObject } from '../lib/fitCameraToObject'
 import { bindIfcRuntimeCamera, probeIfcRuntimeSelection, updateIfcRuntimeView } from '../lib/ifcLoaderRuntime'
+import type { GlbRuntimeModel } from '../types/glb'
 import type { IfcRaycastProbeResult, IfcRuntimeModel } from '../types/ifc'
 import { toSceneObjectReference } from '../lib/sceneObjectIdentity'
 import type {
@@ -17,6 +18,7 @@ import type {
 interface ViewerCanvasProps {
   orbitEnabled?: boolean
   ifcModel: IfcRuntimeModel | null
+  glbModels: GlbRuntimeModel[]
   selectedObject: SceneObjectIdentity | null
   transformMode: SceneObjectTransformMode
   onIfcProbe: (result: IfcRaycastProbeResult) => void
@@ -30,7 +32,7 @@ interface IfcRuntimeBridgeProps {
 }
 
 interface CameraFitBridgeProps {
-  ifcModel: IfcRuntimeModel | null
+  fitTargetModel: { fitId: string; object: Object3D } | null
   orbitControlsRef: RefObject<OrbitControlsImpl | null>
 }
 
@@ -73,23 +75,23 @@ function IfcRuntimeBridge({ ifcModel }: IfcRuntimeBridgeProps) {
   return null
 }
 
-function CameraFitBridge({ ifcModel, orbitControlsRef }: CameraFitBridgeProps) {
+function CameraFitBridge({ fitTargetModel, orbitControlsRef }: CameraFitBridgeProps) {
   const { camera, size } = useThree()
   const fittedModelIdRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!ifcModel) {
-      // 當前場景沒有 IFC model 時重置 fit 記錄，避免下次載入新模型被誤判為已完成。
+    if (!fitTargetModel) {
+      // 當前場景沒有可對焦模型時重置 fit 記錄，避免下次載入新模型被誤判為已完成。
       fittedModelIdRef.current = null
     }
-  }, [ifcModel])
+  }, [fitTargetModel])
 
   useEffect(() => {
-    if (!ifcModel || !ifcModel.object || size.width <= 0 || size.height <= 0) {
+    if (!fitTargetModel || !fitTargetModel.object || size.width <= 0 || size.height <= 0) {
       return
     }
 
-    if (fittedModelIdRef.current === ifcModel.modelId) {
+    if (fittedModelIdRef.current === fitTargetModel.fitId) {
       return
     }
 
@@ -109,23 +111,23 @@ function CameraFitBridge({ ifcModel, orbitControlsRef }: CameraFitBridgeProps) {
     }
 
     const runFit = (trigger: 'raf' | 'timeout-100ms' | 'timeout-300ms') => {
-      if (fittedModelIdRef.current === ifcModel.modelId) {
+      if (fittedModelIdRef.current === fitTargetModel.fitId) {
         return true
       }
 
-      const fitApplied = fitCameraToObject(camera, ifcModel.object, {
+      const fitApplied = fitCameraToObject(camera, fitTargetModel.object, {
         controls: orbitControlsRef.current,
       })
 
       if (fitApplied) {
-        fittedModelIdRef.current = ifcModel.modelId
+        fittedModelIdRef.current = fitTargetModel.fitId
         return true
       }
 
       if (!fitApplied) {
         console.warn('[CameraFit] fit failed', {
           trigger,
-          modelId: ifcModel.modelId,
+          modelId: fitTargetModel.fitId,
         })
       }
 
@@ -153,7 +155,7 @@ function CameraFitBridge({ ifcModel, orbitControlsRef }: CameraFitBridgeProps) {
       window.cancelAnimationFrame(frameId)
       clearDelayedFits()
     }
-  }, [camera, ifcModel, orbitControlsRef, size])
+  }, [camera, fitTargetModel, orbitControlsRef, size])
 
   return null
 }
@@ -393,6 +395,7 @@ function IfcProbeBridge({ ifcModel, onIfcProbe, transformControlsRef }: IfcProbe
 function ViewerCanvas({
   orbitEnabled = true,
   ifcModel,
+  glbModels,
   selectedObject,
   transformMode,
   onIfcProbe,
@@ -402,6 +405,12 @@ function ViewerCanvas({
 }: ViewerCanvasProps) {
   const orbitControlsRef = useRef<OrbitControlsImpl | null>(null)
   const transformControlsRef = useRef<TransformControlsImpl | null>(null)
+  const latestGlbModel = glbModels.length > 0 ? glbModels[glbModels.length - 1] : null
+  const fitTargetModel = ifcModel
+    ? { fitId: ifcModel.modelId, object: ifcModel.object }
+    : latestGlbModel
+      ? { fitId: latestGlbModel.sourceId, object: latestGlbModel.object }
+      : null
 
   return (
     <Canvas camera={{ position: [5.4, 3.8, 5.4], fov: 50, near: 0.1, far: 120 }}>
@@ -426,7 +435,7 @@ function ViewerCanvas({
       <axesHelper args={[2]} />
 
       <IfcRuntimeBridge ifcModel={ifcModel} />
-      <CameraFitBridge ifcModel={ifcModel} orbitControlsRef={orbitControlsRef} />
+      <CameraFitBridge fitTargetModel={fitTargetModel} orbitControlsRef={orbitControlsRef} />
       <TransformControlsBridge
         ifcModel={ifcModel}
         selectedObject={selectedObject}
@@ -438,14 +447,18 @@ function ViewerCanvas({
       />
       <IfcProbeBridge ifcModel={ifcModel} onIfcProbe={onIfcProbe} transformControlsRef={transformControlsRef} />
 
-      {ifcModel ? (
-        <primitive object={ifcModel.object} />
-      ) : (
+      {ifcModel ? <primitive object={ifcModel.object} /> : null}
+
+      {glbModels.map((glbModel) => (
+        <primitive key={glbModel.sourceId} object={glbModel.object} />
+      ))}
+
+      {!ifcModel && glbModels.length === 0 ? (
         <mesh position={[0, 0.2, 0]}>
           <boxGeometry args={[1.4, 1.4, 1.4]} />
           <meshStandardMaterial color="#4d85ab" roughness={0.6} metalness={0.1} />
         </mesh>
-      )}
+      ) : null}
 
       <mesh position={[0, -0.62, 0]} rotation={[-Math.PI / 2, 0, 0]}>
         <planeGeometry args={[24, 24]} />

@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import GlbUploadControl from './components/GlbUploadControl'
 import IfcUploadControl from './components/IfcUploadControl'
 import ProjectJsonOpenControl from './components/ProjectJsonOpenControl'
 import TransformModeToolbar from './components/TransformModeToolbar'
 import ViewerCanvas from './components/ViewerCanvas'
+import { loadGlbRuntimeModel } from './lib/gltfLoaderRuntime'
 import { clearIfcRuntimeSelectionHighlight, loadIfcRuntimeModel, setIfcRuntimeSelectionHighlight } from './lib/ifcLoaderRuntime'
 import {
   cloneProjectTransformRecord,
@@ -14,6 +16,7 @@ import {
 } from './lib/projectPersistence'
 import { getProjectJsonValidationErrors } from './lib/projectSchema'
 import { createNextSelectionState, mapIfcProbeToSceneObjectIdentity } from './lib/sceneObjectIdentity'
+import type { GlbRuntimeModel, GlbUploadState } from './types/glb'
 import type {
   IfcLoadProcess,
   IfcLoadProcessState,
@@ -35,6 +38,12 @@ const initialIfcUploadState: IfcUploadState = {
   file: null,
   status: 'idle',
   message: '尚未選擇 IFC 檔案。',
+}
+
+const initialGlbUploadState: GlbUploadState = {
+  file: null,
+  status: 'idle',
+  message: '尚未選擇 GLB/GLTF 檔案。',
 }
 
 const initialIfcLoadProgressState: IfcLoadProgressState = {
@@ -122,8 +131,10 @@ const isTextEditableTarget = (target: EventTarget | null) => {
 function App() {
   const [orbitControlsEnabled, setOrbitControlsEnabled] = useState(true)
   const [ifcUploadState, setIfcUploadState] = useState<IfcUploadState>(initialIfcUploadState)
+  const [glbUploadState, setGlbUploadState] = useState<GlbUploadState>(initialGlbUploadState)
   const [ifcLoadProgress, setIfcLoadProgress] = useState<IfcLoadProgressState>(initialIfcLoadProgressState)
   const [ifcRuntimeModel, setIfcRuntimeModel] = useState<IfcRuntimeModel | null>(null)
+  const [glbRuntimeModels, setGlbRuntimeModels] = useState<GlbRuntimeModel[]>([])
   const [ifcRaycastProbe, setIfcRaycastProbe] = useState<IfcRaycastProbeResult>(initialIfcRaycastProbeState)
   const [sceneObjectSelection, setSceneObjectSelection] = useState<SceneObjectSelectionState>(initialSceneObjectSelectionState)
   const [sceneObjectTransform, setSceneObjectTransform] = useState<SceneObjectTransformState>(
@@ -443,6 +454,47 @@ function App() {
     })
   }
 
+  const handleSelectGlbFile = async (file: File | null) => {
+    if (!file) {
+      return
+    }
+
+    const fileNameLowerCase = file.name.toLowerCase()
+    const isSupportedGlbFile = fileNameLowerCase.endsWith('.glb') || fileNameLowerCase.endsWith('.gltf')
+    if (!isSupportedGlbFile) {
+      setGlbUploadState({
+        file,
+        status: 'invalid',
+        message: '檔案格式錯誤：請選擇 .glb 或 .gltf 檔案。',
+      })
+      return
+    }
+
+    setGlbUploadState({
+      file,
+      status: 'loading',
+      message: `GLB/GLTF 載入中：${file.name}`,
+    })
+
+    try {
+      const loadedGlbModel = await loadGlbRuntimeModel(file)
+      const nextLoadedCount = glbRuntimeModels.length + 1
+
+      setGlbRuntimeModels((previousModels) => [...previousModels, loadedGlbModel])
+      setGlbUploadState({
+        file,
+        status: 'loaded',
+        message: `GLB/GLTF 載入完成：${loadedGlbModel.fileName}（scene 內共 ${nextLoadedCount} 個 GLB/GLTF）。`,
+      })
+    } catch (error) {
+      setGlbUploadState({
+        file,
+        status: 'error',
+        message: toErrorMessage(error),
+      })
+    }
+  }
+
   const handleIfcProbe = (probeResult: IfcRaycastProbeResult) => {
     const nextIdentity = mapIfcProbeToSceneObjectIdentity(ifcRuntimeModel, probeResult)
 
@@ -587,6 +639,7 @@ function App() {
         </div>
         <div className="toolbar-actions">
           <IfcUploadControl uploadState={ifcUploadState} onSelectIfcFile={handleSelectIfcFile} />
+          <GlbUploadControl uploadState={glbUploadState} onSelectGlbFile={handleSelectGlbFile} />
           <ProjectJsonOpenControl onSelectProjectJsonFile={handleSelectProjectJsonFile} />
           <TransformModeToolbar
             mode={sceneObjectTransform.mode}
@@ -596,7 +649,7 @@ function App() {
           <button type="button" disabled={!ifcRuntimeModel} onClick={handleSaveProjectJson}>
             Save Project JSON
           </button>
-          <span className="status-pill">Step 15</span>
+          <span className="status-pill">Step 16</span>
         </div>
       </header>
 
@@ -610,6 +663,7 @@ function App() {
             <ViewerCanvas
               orbitEnabled={orbitControlsEnabled}
               ifcModel={ifcRuntimeModel}
+              glbModels={glbRuntimeModels}
               selectedObject={sceneObjectSelection.selectedObject}
               transformMode={sceneObjectTransform.mode}
               onIfcProbe={handleIfcProbe}
@@ -626,6 +680,8 @@ function App() {
             <li>Current model: {ifcRuntimeModel ? `${ifcRuntimeModel.sourceType}:${ifcRuntimeModel.modelId}` : 'none'}</li>
             <li>IFC file: {ifcUploadState.file ? ifcUploadState.file.name : 'none'}</li>
             <li>IFC status: {ifcUploadState.status}</li>
+            <li>GLB/GLTF status: {glbUploadState.status}</li>
+            <li>GLB/GLTF models: {glbRuntimeModels.length}</li>
             <li>IFC probe status: {ifcRaycastProbe.status}</li>
             <li>Selected identity: {sceneObjectSelection.selectedObject?.identityId ?? 'none'}</li>
             <li>Transform mode: {sceneObjectTransform.mode}</li>
@@ -635,6 +691,7 @@ function App() {
             <li>Project open status: {projectOpenState.status}</li>
           </ul>
           <p className={`ifc-state-message is-${ifcUploadState.status}`}>{ifcUploadState.message}</p>
+          <p className={`ifc-state-message is-${glbUploadState.status}`}>{glbUploadState.message}</p>
           {ifcUploadState.status === 'loading' && (
             <section className="ifc-progress-card" aria-label="IFC loading progress">
               <div className="ifc-progress-head">
@@ -764,7 +821,19 @@ function App() {
               <li>updated at: {projectOpenState.updatedAt ?? '--'}</li>
             </ul>
           </section>
-          <p>Step 15 已接上 Cmd/Ctrl+S 快速儲存；Save Project JSON 與快捷鍵共用同一流程。</p>
+          <section className={`ifc-probe-card is-${glbUploadState.status}`} aria-label="GLB/GLTF upload state">
+            <h3>GLB/GLTF Upload State (Step 16)</h3>
+            <p>{glbUploadState.message}</p>
+            <ul>
+              <li>status: {glbUploadState.status}</li>
+              <li>file: {glbUploadState.file?.name ?? 'none'}</li>
+              <li>loaded models: {glbRuntimeModels.length}</li>
+              <li>
+                latest source: {glbRuntimeModels.length > 0 ? `${glbRuntimeModels[glbRuntimeModels.length - 1].sourceType}:${glbRuntimeModels[glbRuntimeModels.length - 1].sourceId}` : 'none'}
+              </li>
+            </ul>
+          </section>
+          <p>Step 16 已接上 GLB/GLTF upload；可與既有 IFC 一起顯示於 scene。</p>
         </aside>
       </section>
     </main>
